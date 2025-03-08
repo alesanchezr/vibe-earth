@@ -10,8 +10,8 @@ export class World {
     constructor() {
         // Configuration
         this.config = {
-            joinInterval: 20000, // New person every 20 seconds
-            maxPeople: 50,       // Maximum number of people to show
+            joinInterval: 5000,        // New person every 5 seconds (faster to reach the higher limit)
+            maxPeople: 2000,           // Maximum number of people to show (increased from 50 to 2000)
             colors: [
                 0x4285F4, // Blue
                 0xEA4335, // Red
@@ -20,15 +20,16 @@ export class World {
                 0x9C27B0, // Purple
                 0xFF9800  // Orange
             ],
-            minSize: 20,
-            maxSize: 50,
-            minZoom: 0.5,        // Minimum zoom level
-            maxZoom: 3.0,        // Maximum zoom level
-            zoomSpeed: 0.1,      // Zoom speed factor
-            collisionIterations: 10,  // Max iterations for collision resolution
-            cameraInertia: 0.95,      // Camera inertia factor (0-1) - higher means more inertia
-            cameraDamping: 0.2,       // Camera movement damping factor - higher means faster response
-            cameraMovementSpeed: 2.0   // Base speed multiplier for camera movement
+            minSize: 15,               // Slightly smaller minimum size for better performance
+            maxSize: 40,               // Slightly smaller maximum size for better performance
+            minZoom: 0.25,             // Minimum zoom level (allows viewing from higher)
+            maxZoom: 4.0,              // Maximum zoom level (allows closer zoom)
+            zoomSpeed: 0.1,            // Zoom speed factor
+            collisionIterations: 5,    // Reduced iterations for better performance with many people
+            cameraInertia: 0.95,       // Camera inertia factor (0-1) - higher means more inertia
+            cameraDamping: 0.2,        // Camera movement damping factor - higher means faster response
+            cameraMovementSpeed: 2.0,  // Base speed multiplier for camera movement
+            maxHeight: 4000            // Maximum camera height in units (4km)
         };
         
         // Initialize properties
@@ -41,13 +42,17 @@ export class World {
         
         // Camera movement with inertia
         this.cameraVelocity = { x: 0, z: 0 };
-        this.targetCameraPosition = { x: 0, y: 1000, z: 0 };
+        this.targetCameraPosition = { x: 0, y: this.config.maxHeight, z: 0 };
         
         // Initialize Three.js
         this.initThree();
         
         // Set up event listeners
         this.setupEventListeners();
+        
+        // Initialize UI displays
+        this.updateCounterDisplay();
+        this.updateZoomIndicator();
         
         // Start the simulation
         this.startSimulation();
@@ -67,11 +72,12 @@ export class World {
             60, // Field of view
             aspectRatio,
             1,
-            2000
+            20000 // Increased far plane to see from higher altitude
         );
         
-        // Position camera above the scene looking down (twice as far)
-        this.camera.position.set(0, 1000, 0); // Increased from 500 to 1000
+        // Position camera at maximum height (4km)
+        const maxHeight = 4000; // 4km
+        this.camera.position.set(0, maxHeight, 0);
         this.camera.lookAt(0, 0, 0);
         this.camera.up.set(0, 0, -1); // This makes "up" in the view aligned with negative z-axis
         
@@ -90,28 +96,32 @@ export class World {
         this.renderer.setSize(window.innerWidth, window.innerHeight);
         this.renderer.setPixelRatio(window.devicePixelRatio);
         
-        // Add a grid helper for debugging
-        const gridHelper = new THREE.GridHelper(1000, 100);
-        this.scene.add(gridHelper);
-        
-        // Add a ground plane
-        const groundGeometry = new THREE.PlaneGeometry(2000, 2000);
-        const groundMaterial = new THREE.MeshBasicMaterial({ 
-            color: 0x90EE90,  // Light green
+        // Add a very wide ground plane
+        const groundSize = 10000; // Much larger ground plane
+        const groundGeometry = new THREE.PlaneGeometry(groundSize, groundSize);
+        const groundMaterial = new THREE.MeshLambertMaterial({ 
+            color: 0xA5D6A7,  // Slightly darker green
             transparent: true,
-            opacity: 0.5
+            opacity: 0.7,
+            emissive: 0x103810, // Very slight green glow
+            emissiveIntensity: 0.1,
+            flatShading: true
         });
+        
         this.ground = new THREE.Mesh(groundGeometry, groundMaterial);
         this.ground.rotation.x = -Math.PI / 2; // Rotate to be horizontal
         this.ground.position.y = 0; // Position at y=0
         this.scene.add(this.ground);
         
-        // Add ambient light
-        const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+        // Add fog to create a sense of distance
+        this.scene.fog = new THREE.Fog(0xf0f0f0, 5000, 15000);
+        
+        // Add ambient light - increased for better diffuse lighting
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
         this.scene.add(ambientLight);
         
-        // Add directional light (simulating sun)
-        const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+        // Add directional light with reduced intensity
+        const directionalLight = new THREE.DirectionalLight(0xffffff, 0.4);
         directionalLight.position.set(0, 100, 0);
         directionalLight.lookAt(0, 0, 0);
         this.scene.add(directionalLight);
@@ -252,7 +262,7 @@ export class World {
         
         // Calculate new camera height based on zoom level
         // Higher zoom level = lower camera height (closer to ground)
-        const baseHeight = 1000; // Base height at zoom level 1.0
+        const baseHeight = 4000; // Base height at zoom level 1.0 (4km)
         const newHeight = baseHeight / this.zoomLevel;
         
         // Update camera position, maintaining x and z coordinates
@@ -263,6 +273,29 @@ export class World {
         
         // Ensure camera is still looking at the same point on the ground
         this.camera.lookAt(lookAtPoint);
+        
+        // Update zoom indicator
+        this.updateZoomIndicator();
+    }
+    
+    /**
+     * Update the zoom indicator with the current view distance in kilometers
+     */
+    updateZoomIndicator() {
+        const zoomValueElement = document.getElementById('zoom-value');
+        const fovValueElement = document.getElementById('fov-value');
+        
+        if (zoomValueElement) {
+            // Convert camera height to kilometers (assuming 1 unit = 1 meter)
+            // Scale factor can be adjusted based on your world scale
+            const viewDistanceKm = (this.camera.position.y / 1000).toFixed(1);
+            zoomValueElement.textContent = viewDistanceKm;
+        }
+        
+        if (fovValueElement) {
+            // Show the current field of view
+            fovValueElement.textContent = Math.round(this.camera.fov);
+        }
     }
     
     /**
@@ -380,14 +413,36 @@ export class World {
         console.log("Animation loop started");
         
         // Add initial people
-        const initialCount = 10;
+        const initialCount = 100; // Increased from 10 to 100
         console.log(`Adding ${initialCount} initial people`);
-        for (let i = 0; i < initialCount; i++) {
-            console.log(`Adding person ${i + 1}`);
-            this.addPerson();
-        }
         
-        // Schedule adding more people periodically
+        // Add people in batches to avoid freezing the UI
+        const batchSize = 20;
+        const addBatch = (startIndex) => {
+            const endIndex = Math.min(startIndex + batchSize, initialCount);
+            
+            for (let i = startIndex; i < endIndex; i++) {
+                console.log(`Adding initial person ${i+1}/${initialCount}`);
+                this.addPerson();
+            }
+            
+            if (endIndex < initialCount) {
+                // Schedule next batch
+                setTimeout(() => addBatch(endIndex), 100);
+            } else {
+                // All initial people added, schedule regular additions
+                this.scheduleNextPerson();
+            }
+        };
+        
+        // Start adding the first batch
+        addBatch(0);
+    }
+    
+    /**
+     * Schedule the next person to be added
+     */
+    scheduleNextPerson() {
         const nextInterval = this.config.joinInterval * (0.5 + Math.random());
         console.log(`Scheduled next person in ${nextInterval/1000} seconds`);
         this.nextPersonTimeout = setTimeout(() => this.addPerson(), nextInterval);
@@ -397,11 +452,9 @@ export class World {
      * Add a new person to the world
      */
     addPerson() {
-        console.log("Attempting to add a new person...");
-        
         // Don't add more people if we've reached the maximum
         if (this.people.length >= this.config.maxPeople) {
-            console.log("Maximum people reached, removing oldest person");
+            console.log(`Maximum people (${this.config.maxPeople}) reached, removing oldest person`);
             // Remove the oldest person first
             const oldestPerson = this.people.shift();
             oldestPerson.animateExit(() => {
@@ -417,37 +470,40 @@ export class World {
         const colorIndex = Math.floor(Math.random() * this.config.colors.length);
         const color = this.config.colors[colorIndex];
         
-        console.log("Finding non-colliding position for new person");
         // Find a position that doesn't collide with existing people
         const position = this.findNonCollidingPosition(size);
-        console.log("Position found:", position);
         
         // Create the person
         const person = new Person({
             size: size,
             color: color,
             position: position,
-            scene: this.scene
+            scene: this.scene,
+            cameraY: this.camera.position.y // Pass the current camera height
         });
-        
-        console.log("Person created with size:", size, "color:", color.toString(16));
         
         // Add to our array
         this.people.push(person);
-        console.log("Total people in scene:", this.people.length);
         
-        // Update counter display if it exists
+        // Update counter display
+        this.updateCounterDisplay();
+        
+        // Schedule the next person (only if this wasn't called from a batch)
+        if (this.people.length % 20 !== 0 || this.people.length > 100) {
+            this.scheduleNextPerson();
+        }
+        
+        return person;
+    }
+    
+    /**
+     * Update the counter display with the current number of people
+     */
+    updateCounterDisplay() {
         const counterElement = document.getElementById('counter');
         if (counterElement) {
             counterElement.textContent = this.people.length;
         }
-        
-        // Schedule the next person
-        const nextInterval = this.config.joinInterval * (0.5 + Math.random());
-        console.log("Scheduling next person in", nextInterval/1000, "seconds");
-        this.nextPersonTimeout = setTimeout(() => this.addPerson(), nextInterval);
-        
-        return person;
     }
     
     /**
@@ -460,102 +516,95 @@ export class World {
         const frustumHeight = 2 * Math.tan(this.camera.fov * Math.PI / 360) * this.camera.position.y;
         const frustumWidth = frustumHeight * this.camera.aspect;
         
-        // Add some margin
-        const margin = 100;
+        // Calculate visible area with some margin
+        const visibleWidth = frustumWidth * 1.5; // 50% larger than visible area
+        const visibleHeight = frustumHeight * 1.5;
+        
+        // Center the spawn area around the camera's current position
         const bounds = {
-            minX: -frustumWidth / 2 + margin,
-            maxX: frustumWidth / 2 - margin,
-            minZ: -frustumHeight / 2 + margin,
-            maxZ: frustumHeight / 2 - margin
+            minX: this.camera.position.x - visibleWidth / 2,
+            maxX: this.camera.position.x + visibleWidth / 2,
+            minZ: this.camera.position.z - visibleHeight / 2,
+            maxZ: this.camera.position.z + visibleHeight / 2
         };
         
-        // Try random positions until we find one without collisions
-        let attempts = 0;
-        const maxAttempts = 100;
-        
-        while (attempts < maxAttempts) {
-            // Generate random position within bounds
+        // With many people, we need to be more efficient
+        // First try a few random positions
+        const quickAttempts = 5;
+        for (let i = 0; i < quickAttempts; i++) {
             const position = {
                 x: bounds.minX + Math.random() * (bounds.maxX - bounds.minX),
                 z: bounds.minZ + Math.random() * (bounds.maxZ - bounds.minZ)
             };
             
-            // Check if this position collides with any existing person
-            if (!this.hasCollision(position, radius)) {
+            // Only check against nearby people for better performance
+            if (!this.hasNearbyCollision(position, radius)) {
                 return position;
             }
-            
-            attempts++;
         }
         
-        // If we couldn't find a non-colliding position after max attempts,
-        // try to resolve collisions from a random position
-        const position = {
+        // If quick attempts fail, try a grid-based approach
+        // Divide the visible area into a grid and find an empty cell
+        const gridSize = radius * 2.5; // Cell size based on person radius
+        const gridWidth = Math.ceil(visibleWidth / gridSize);
+        const gridHeight = Math.ceil(visibleHeight / gridSize);
+        
+        // Try random grid cells
+        const maxGridAttempts = 20;
+        for (let i = 0; i < maxGridAttempts; i++) {
+            const gridX = Math.floor(Math.random() * gridWidth);
+            const gridZ = Math.floor(Math.random() * gridHeight);
+            
+            const position = {
+                x: bounds.minX + (gridX + 0.5) * gridSize,
+                z: bounds.minZ + (gridZ + 0.5) * gridSize
+            };
+            
+            if (!this.hasNearbyCollision(position, radius)) {
+                return position;
+            }
+        }
+        
+        // If all else fails, just return a random position and let physics handle it
+        return {
             x: bounds.minX + Math.random() * (bounds.maxX - bounds.minX),
             z: bounds.minZ + Math.random() * (bounds.maxZ - bounds.minZ)
         };
-        
-        return this.resolveCollisions(position, radius);
     }
     
     /**
-     * Check if a position collides with any existing person
+     * Check if a position collides with nearby people (optimization for many people)
      * @param {Object} position Position to check {x, z}
      * @param {number} radius Radius of the new person
      * @returns {boolean} True if collision detected
      */
-    hasCollision(position, radius) {
-        return this.people.some(person => person.collidesWithPosition(position, radius));
-    }
-    
-    /**
-     * Resolve collisions by moving the position away from colliding people
-     * @param {Object} position Initial position {x, z}
-     * @param {number} radius Radius of the new person
-     * @returns {Object} Resolved position {x, z}
-     */
-    resolveCollisions(position, radius) {
-        const resolvedPosition = { x: position.x, z: position.z };
+    hasNearbyCollision(position, radius) {
+        // Only check against people within a certain distance
+        const checkDistance = radius * 10; // Only check people within 10x radius
         
-        // Maximum iterations to prevent infinite loops
-        const maxIterations = this.config.collisionIterations;
-        let iterations = 0;
+        // With many people, only check a subset for better performance
+        const maxPeopleToCheck = 50;
+        const peopleToCheck = this.people.length <= maxPeopleToCheck ? 
+            this.people : 
+            this.people.slice(-maxPeopleToCheck); // Check only the most recent people
         
-        while (iterations < maxIterations) {
-            let hasCollision = false;
+        for (const person of peopleToCheck) {
+            const personPos = person.getPosition();
+            const dx = position.x - personPos.x;
+            const dz = position.z - personPos.z;
+            const distanceSquared = dx * dx + dz * dz;
             
-            // Check collisions with all people
-            for (const person of this.people) {
-                const personPos = person.getPosition();
-                const dx = resolvedPosition.x - personPos.x;
-                const dz = resolvedPosition.z - personPos.z;
-                const distance = Math.sqrt(dx * dx + dz * dz);
-                const minDistance = radius + person.size;
-                
-                // If collision detected
-                if (distance < minDistance) {
-                    hasCollision = true;
-                    
-                    // Calculate normalized direction vector
-                    const nx = dx / distance || 0;
-                    const nz = dz / distance || 0;
-                    
-                    // Move position away from collision
-                    const moveDistance = minDistance - distance + 1; // Add 1 for a small buffer
-                    resolvedPosition.x += nx * moveDistance;
-                    resolvedPosition.z += nz * moveDistance;
+            // Quick distance check before doing full collision check
+            if (distanceSquared < checkDistance * checkDistance) {
+                // Only do the more expensive sqrt operation if potentially close
+                const distance = Math.sqrt(distanceSquared);
+                if (distance < radius + person.size) {
+                    return true; // Collision detected
                 }
             }
-            
-            // If no collisions, we're done
-            if (!hasCollision) {
-                break;
-            }
-            
-            iterations++;
         }
         
-        return resolvedPosition;
+        return false; // No collision
     }
 
     /**
@@ -599,6 +648,12 @@ export class World {
         
         // Keep the camera looking at the ground below it
         this.camera.lookAt(this.camera.position.x, 0, this.camera.position.z);
+        
+        // Update UI indicators every 10 frames to avoid performance issues
+        if (this.frameCount % 10 === 0) {
+            this.updateZoomIndicator();
+            this.updateCounterDisplay();
+        }
         
         // Update each person
         const time = Date.now() * 0.001; // Current time in seconds

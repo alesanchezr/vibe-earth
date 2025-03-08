@@ -16,14 +16,9 @@ export class Person {
      * @param {number} options.color - Color of the person bubble (hex)
      * @param {Object} options.position - Position {x, y} in the scene
      * @param {THREE.Scene} options.scene - The Three.js scene to add to
+     * @param {number} options.cameraY - Optional camera height
      */
     constructor(options) {
-        console.log("Creating new Person with options:", {
-            size: options.size,
-            color: options.color.toString(16),
-            position: options.position
-        });
-        
         this.size = options.size;
         this.color = options.color;
         
@@ -34,9 +29,8 @@ export class Person {
             z: options.position.z || options.position.y // Support both z and y for backward compatibility
         };
         
-        console.log("Normalized position:", this.position);
-        
         this.scene = options.scene;
+        this.cameraY = options.cameraY || 4000; // Get camera height or default to 4km
         
         // Animation properties
         this.floatSpeed = 0.5 + Math.random() * 0.5;
@@ -45,24 +39,29 @@ export class Person {
         this.originalY = this.position.y;
         this.isFloating = false; // Start with floating disabled until physics simulation completes
         
-        // Physics properties
-        this.velocity = { x: 0, y: 0, z: 0 };
-        this.acceleration = { x: 0, y: -9.8, z: 0 }; // Gravity acceleration (m/s²)
-        this.damping = 0.6; // Energy loss on bounce (0-1)
+        // Physics properties - EXTREME SPEED with NO BOUNCING
+        // Add small random horizontal velocity for more interesting falling motion
+        this.velocity = { 
+            x: (Math.random() - 0.5) * 50, // Increased random x velocity
+            y: -200, // Much higher initial downward velocity
+            z: (Math.random() - 0.5) * 50  // Increased random z velocity
+        };
+        this.acceleration = { x: 0, y: -500, z: 0 }; // Extreme gravity acceleration
         this.isSimulating = true; // Whether physics simulation is active
         this.groundLevel = 0; // Y-coordinate of the ground
         
         // Create the mesh
         this.mesh = this.createMesh();
-        console.log("Mesh created:", this.mesh);
         
         // Add to scene
         this.scene.add(this.mesh);
-        console.log("Mesh added to scene");
         
-        // Start position (in the air)
-        this.mesh.position.set(this.position.x, this.position.y + 200, this.position.z);
-        console.log("Initial mesh position set:", this.mesh.position);
+        // Start position high above the camera
+        const startHeight = this.cameraY + 1000; // 1000 units above the camera (which is now at 4km)
+        this.mesh.position.set(this.position.x, startHeight, this.position.z);
+        
+        // Set the initial position for physics simulation
+        this.position.y = startHeight;
     }
     
     /**
@@ -70,17 +69,19 @@ export class Person {
      * @returns {THREE.Mesh} The created mesh
      */
     createMesh() {
-        console.log("Creating mesh with size:", this.size);
         // Create a 3D cylinder for the person
         const height = this.size * 2;
-        const geometry = new THREE.CylinderGeometry(this.size, this.size, height, 16);
+        const geometry = new THREE.CylinderGeometry(this.size, this.size * 1.2, height, 16);
         
-        // Create material with phong shading for 3D look
-        const material = new THREE.MeshPhongMaterial({
+        // Create material with no specular highlights to prevent whitish appearance
+        const material = new THREE.MeshLambertMaterial({
             color: this.color,
             transparent: true,
-            opacity: 0.8,
-            shininess: 30
+            opacity: 0.9,
+            emissive: new THREE.Color(this.color).multiplyScalar(0.2), // Slight self-illumination
+            emissiveIntensity: 0.2,
+            reflectivity: 0,
+            flatShading: false
         });
         
         const mesh = new THREE.Mesh(geometry, material);
@@ -88,27 +89,26 @@ export class Person {
         // Adjust the position so the bottom of the cylinder is at y=0 when on ground
         mesh.position.y = height / 2;
         
-        console.log("Mesh created with geometry:", geometry);
+        // Add a slight random rotation for more visual interest
+        mesh.rotation.y = Math.random() * Math.PI * 2;
+        
         return mesh;
     }
     
     /**
-     * Start the falling animation
+     * Start the floating animation after impact
      */
     animateEntry() {
-        // Create a tween for smooth entry animation
-        const targetPosition = {
-            x: this.position.x,
-            y: this.position.y,
-            z: this.position.z
-        };
-        
-        new TWEEN.Tween(this.mesh.position)
-            .to({ x: targetPosition.x, y: targetPosition.y + this.size, z: targetPosition.z }, 1000)
-            .easing(TWEEN.Easing.Bounce.Out)
+        // Create a subtle scale animation for impact
+        new TWEEN.Tween(this.mesh.scale)
+            .to({ x: 1.2, y: 0.8, z: 1.2 }, 100)
+            .easing(TWEEN.Easing.Cubic.Out)
             .onComplete(() => {
-                this.isFloating = true;
-                this.isSimulating = false;
+                // Return to normal scale
+                new TWEEN.Tween(this.mesh.scale)
+                    .to({ x: 1, y: 1, z: 1 }, 300)
+                    .easing(TWEEN.Easing.Elastic.Out)
+                    .start();
             })
             .start();
     }
@@ -120,38 +120,189 @@ export class Person {
     updatePhysics(deltaTime) {
         if (!this.isSimulating) return;
         
+        // Cap deltaTime to prevent issues with very large jumps
+        const dt = Math.min(deltaTime, 0.05);
+        
         // Apply acceleration to velocity
-        this.velocity.x += this.acceleration.x * deltaTime;
-        this.velocity.y += this.acceleration.y * deltaTime;
-        this.velocity.z += this.acceleration.z * deltaTime;
+        this.velocity.x += this.acceleration.x * dt;
+        this.velocity.y += this.acceleration.y * dt;
+        this.velocity.z += this.acceleration.z * dt;
+        
+        // Apply terminal velocity limit for more realistic falling
+        const terminalVelocity = -3000; // Extreme terminal velocity
+        if (this.velocity.y < terminalVelocity) {
+            this.velocity.y = terminalVelocity;
+        }
         
         // Apply velocity to position
-        this.position.x += this.velocity.x * deltaTime;
-        this.position.y += this.velocity.y * deltaTime;
-        this.position.z += this.velocity.z * deltaTime;
+        this.position.x += this.velocity.x * dt;
+        this.position.y += this.velocity.y * dt;
+        this.position.z += this.velocity.z * dt;
         
         // Check for ground collision
         if (this.position.y < this.groundLevel + this.size) {
-            // Bounce
+            // Stop at ground level - no bouncing
             this.position.y = this.groundLevel + this.size;
-            this.velocity.y = -this.velocity.y * this.damping;
             
-            // Apply damping to horizontal velocity too
-            this.velocity.x *= this.damping;
-            this.velocity.z *= this.damping;
+            // Create impact wave effect
+            this.createImpactWave();
             
-            // Stop simulating if velocity is very low
-            if (Math.abs(this.velocity.y) < 0.5 && 
-                Math.abs(this.velocity.x) < 0.5 && 
-                Math.abs(this.velocity.z) < 0.5) {
-                this.isSimulating = false;
-                this.isFloating = true;
-                this.animateEntry();
-            }
+            // Stop simulating immediately
+            this.isSimulating = false;
+            this.isFloating = true;
+            
+            // Start floating animation
+            this.animateEntry();
         }
         
         // Update mesh position
         this.mesh.position.set(this.position.x, this.position.y + this.size, this.position.z);
+    }
+    
+    /**
+     * Create an expanding wave effect at the impact point
+     */
+    createImpactWave() {
+        // Calculate impact force based on velocity
+        const impactForce = Math.min(Math.abs(this.velocity.y) / 100, 10);
+        const maxRadius = this.size * 10 * impactForce; // Scale wave size with impact force
+        
+        // For performance with many people, only create the main wave and flash
+        this.createWaveRing(0.1, 0.5, maxRadius, 800, 0.7); // Main wave
+        
+        // Add a flash of light at impact point
+        const flashGeometry = new THREE.CircleGeometry(this.size * 2, 16);
+        const flashMaterial = new THREE.MeshBasicMaterial({
+            color: 0xffffff,
+            transparent: true,
+            opacity: 0.8,
+            side: THREE.DoubleSide
+        });
+        
+        const flash = new THREE.Mesh(flashGeometry, flashMaterial);
+        flash.position.set(this.position.x, 0.2, this.position.z);
+        flash.rotation.x = Math.PI / 2;
+        this.scene.add(flash);
+        
+        // Animate the flash fading quickly
+        new TWEEN.Tween(flashMaterial)
+            .to({ opacity: 0 }, 200)
+            .easing(TWEEN.Easing.Cubic.Out)
+            .onComplete(() => {
+                this.scene.remove(flash);
+                flashMaterial.dispose();
+                flashGeometry.dispose();
+            })
+            .start();
+        
+        // Only create dust particles for larger people (performance optimization)
+        if (this.size > 25 && Math.random() < 0.3) {
+            this.createDustParticles(5); // Reduced particle count
+        }
+    }
+    
+    /**
+     * Create a single wave ring with the given parameters
+     */
+    createWaveRing(innerRadius, outerRadius, maxRadius, duration, opacity) {
+        // Create a ring geometry for the wave
+        const waveGeometry = new THREE.RingGeometry(innerRadius, outerRadius, 16);
+        const waveMaterial = new THREE.MeshBasicMaterial({
+            color: 0xdddddd,
+            transparent: true,
+            opacity: opacity,
+            side: THREE.DoubleSide
+        });
+        
+        const wave = new THREE.Mesh(waveGeometry, waveMaterial);
+        
+        // Position the wave at ground level
+        wave.position.set(this.position.x, 0.1, this.position.z); // Slightly above ground to avoid z-fighting
+        wave.rotation.x = Math.PI / 2; // Rotate to be horizontal
+        
+        // Add to scene
+        this.scene.add(wave);
+        
+        // Scale animation
+        new TWEEN.Tween(wave.scale)
+            .to({ x: maxRadius, y: maxRadius, z: 1 }, duration)
+            .easing(TWEEN.Easing.Cubic.Out)
+            .start();
+        
+        // Opacity animation
+        new TWEEN.Tween(waveMaterial)
+            .to({ opacity: 0 }, duration)
+            .easing(TWEEN.Easing.Cubic.Out)
+            .onComplete(() => {
+                // Remove the wave from the scene when animation completes
+                this.scene.remove(wave);
+                waveMaterial.dispose();
+                waveGeometry.dispose();
+            })
+            .start();
+    }
+    
+    /**
+     * Create dust particles that fly outward from the impact point
+     * @param {number} particleCount Number of particles to create
+     */
+    createDustParticles(particleCount = 10) {
+        const particleSize = this.size / 6;
+        
+        for (let i = 0; i < particleCount; i++) {
+            // Create a small sphere for each particle
+            const geometry = new THREE.SphereGeometry(particleSize * (0.5 + Math.random() * 0.5), 4, 4);
+            const material = new THREE.MeshBasicMaterial({
+                color: 0xcccccc,
+                transparent: true,
+                opacity: 0.5 + Math.random() * 0.3
+            });
+            
+            const particle = new THREE.Mesh(geometry, material);
+            
+            // Position at impact point
+            particle.position.set(
+                this.position.x,
+                0.1 + Math.random() * 0.3,
+                this.position.z
+            );
+            
+            this.scene.add(particle);
+            
+            // Random direction outward
+            const angle = Math.random() * Math.PI * 2;
+            const distance = this.size * (2 + Math.random() * 3);
+            
+            // Calculate target position
+            const targetX = this.position.x + Math.cos(angle) * distance;
+            const targetY = 0.5 + Math.random() * 1.5; // Lower height
+            const targetZ = this.position.z + Math.sin(angle) * distance;
+            
+            // Animate position - flying outward and up, then down
+            new TWEEN.Tween(particle.position)
+                .to({ x: targetX, y: targetY, z: targetZ }, 200 + Math.random() * 100)
+                .easing(TWEEN.Easing.Cubic.Out)
+                .onComplete(() => {
+                    // Fall back down
+                    new TWEEN.Tween(particle.position)
+                        .to({ y: 0 }, 100 + Math.random() * 150)
+                        .easing(TWEEN.Easing.Cubic.In)
+                        .start();
+                })
+                .start();
+            
+            // Animate opacity - fade out
+            new TWEEN.Tween(material)
+                .to({ opacity: 0 }, 300 + Math.random() * 200)
+                .easing(TWEEN.Easing.Cubic.In)
+                .delay(200)
+                .onComplete(() => {
+                    this.scene.remove(particle);
+                    material.dispose();
+                    geometry.dispose();
+                })
+                .start();
+        }
     }
     
     /**
