@@ -1,5 +1,5 @@
 /**
- * Main entry point for the Online World Visualization
+ * Main entry point for the Geek World Visualization
  */
 import './style.css';
 import { World } from './World.js';
@@ -8,7 +8,7 @@ console.log("Application script loaded");
 
 // Initialize the application when the DOM is ready
 document.addEventListener('DOMContentLoaded', () => {
-    console.log("DOM loaded, initializing application");
+    console.log("DOM loaded, initializing Geek World");
     
     try {
         console.log("Creating World instance");

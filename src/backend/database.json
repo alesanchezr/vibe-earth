@@ -1,0 +1,19 @@
+{
+  "dev": {
+    "driver": "pg",
+    "user": "postgres",
+    "password": "postgres",
+    "host": "localhost",
+    "database": "geekworld",
+    "port": 5432
+  },
+  "production": {
+    "driver": "pg",
+    "connectionString": {
+      "ENV": "DATABASE_URL"
+    },
+    "ssl": {
+      "rejectUnauthorized": false
+    }
+  }
+} 

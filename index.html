@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Geek World</title>
+    <title>Vibe Earth</title>
     <style>
         body, html {
             margin: 0;
@@ -34,14 +34,18 @@
             left: 20px;
             background-color: rgba(0, 0, 0, 0.7);
             color: white;
-            padding: 12px 15px;
+            padding: 15px 20px;
             border-radius: 8px;
             font-family: Arial, sans-serif;
-            font-size: 16px;
+            font-size: 14px;
             font-weight: bold;
             z-index: 100;
             box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
             border: 1px solid rgba(255, 255, 255, 0.2);
+            min-width: 180px;
+        }
+        #stats p {
+            margin: 8px 0;
         }
         #zoom-indicator {
             position: absolute;
@@ -68,13 +72,14 @@
     <div id="container">
         <canvas id="worldCanvas"></canvas>
         <div id="stats">
-            <p>Geeks Learning Online: <span id="counter" class="indicator-value">0</span></p>
+            <p>Users Online: <span id="counter" class="indicator-value">0</span></p>
+            <p>Total Users: <span id="total-counter" class="indicator-value">0</span></p>
         </div>
         <div id="zoom-indicator">
             <div>View Height: <span id="zoom-value" class="indicator-value">1.0</span> km</div>
             <div>Field of View: <span id="fov-value" class="indicator-value">60</span>°</div>
         </div>
     </div>
-    <script type="module" src="/src/main.js"></script>
+    <script type="module" src="/src/frontend/main.js"></script>
 </body>
 </html> 

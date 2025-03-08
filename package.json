@@ -1,18 +1,33 @@
 {
-  "name": "online-world-visualization",
-  "private": true,
+  "name": "geek-world",
   "version": "1.0.0",
-  "type": "module",
+  "description": "3D visualization of geeks coming online on a spherical planet",
   "scripts": {
-    "dev": "vite",
-    "build": "vite build",
-    "preview": "vite preview"
+    "start": "cd src/backend && npm start",
+    "dev": "cd src/backend && npm run dev",
+    "frontend": "vite",
+    "frontend:build": "vite build",
+    "frontend:preview": "vite preview",
+    "dev:all": "concurrently \"npm run dev\" \"npm run frontend\"",
+    "migrate": "cd src/backend && npm run migrate",
+    "migrate:up": "cd src/backend && npm run migrate:up",
+    "migrate:down": "cd src/backend && npm run migrate:down",
+    "setup": "npm install && cd src/backend && npm install"
+  },
+  "keywords": [
+    "threejs",
+    "websocket",
+    "visualization",
+    "postgresql"
+  ],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "concurrently": "^8.2.2",
+    "vite": "^5.0.0"
   },
   "dependencies": {
-    "three": "^0.150.0",
-    "@tweenjs/tween.js": "^18.6.4"
-  },
-  "devDependencies": {
-    "vite": "^4.3.0"
+    "@tweenjs/tween.js": "^25.0.0",
+    "three": "^0.174.0"
   }
-} 
+}
