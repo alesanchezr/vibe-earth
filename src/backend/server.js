@@ -64,12 +64,22 @@ app.get('/api/stats', async (req, res) => {
     onlineTimeThreshold.setMinutes(onlineTimeThreshold.getMinutes() - 5); // Consider users from last 5 minutes as "online"
     
     const onlineUsersResult = await db.query(
-      'SELECT id FROM geeks WHERE created_at > $1 ORDER BY created_at DESC',
+      'SELECT id, position_x, position_y, position_z, size, color FROM geeks WHERE created_at > $1 ORDER BY created_at DESC',
       [onlineTimeThreshold]
     );
     
-    const onlineUserIds = onlineUsersResult.rows.map(user => user.id);
-    const totalOnlineUsers = onlineUserIds.length;
+    // Include full user data instead of just IDs
+    const onlineUsers = onlineUsersResult.rows.map(user => ({
+      id: user.id,
+      position: {
+        x: user.position_x,
+        y: user.position_y,
+        z: user.position_z
+      },
+      size: user.size,
+      color: user.color
+    }));
+    const totalOnlineUsers = onlineUsers.length;
     
     // Calculate day-night cycle
     // Use a fixed start time (server start time) to ensure consistency across clients
@@ -81,7 +91,7 @@ app.get('/api/stats', async (req, res) => {
     res.json({
       totalUsers,
       totalOnlineUsers,
-      onlineUserIds,
+      onlineUsers, // Changed from onlineUserIds to onlineUsers with full data
       // Add day-night cycle information
       day_night_cycle: {
         duration: DAY_DURATION,

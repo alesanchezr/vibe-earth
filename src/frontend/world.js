@@ -295,6 +295,19 @@ export class World {
                 totalCounterElement.textContent = stats.totalUsers;
             }
             
+            // Render online users if available
+            if (stats.onlineUsers && Array.isArray(stats.onlineUsers)) {
+                // Get current user IDs in the scene
+                const currentUserIds = this.users.map(user => user.id).filter(id => id !== undefined);
+                
+                // Add new users that aren't already in the scene
+                stats.onlineUsers.forEach(userData => {
+                    if (!currentUserIds.includes(userData.id)) {
+                        this.addUserFromServer(userData);
+                    }
+                });
+            }
+            
             // If we have day-night cycle information and a sky, update it
             if (stats.day_night_cycle && this.sky) {
                 // The sky will handle syncing internally via its syncWithServer method
@@ -358,12 +371,19 @@ export class World {
      * @param {Object} userData The user data from the server
      */
     addUserFromServer(userData) {
-        // Convert database format to our format
-        const position = {
-            x: userData.position_x,
-            y: userData.position_y,
-            z: userData.position_z
-        };
+        // Check if position is already in the correct format
+        let position;
+        if (userData.position) {
+            // New format: position is already an object with x, y, z
+            position = userData.position;
+        } else {
+            // Old format: position_x, position_y, position_z as separate properties
+            position = {
+                x: userData.position_x,
+                y: userData.position_y,
+                z: userData.position_z
+            };
+        }
         
         // Ensure color is in the correct format
         let color = userData.color;
