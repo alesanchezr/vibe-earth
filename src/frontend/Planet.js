@@ -53,15 +53,8 @@ export class Planet {
         this.mesh = new THREE.Mesh(geometry, this.material);
         this.mesh.position.set(0, 0, 0);
         
-        // Add a wireframe to help with debugging
-        const wireframeGeometry = new THREE.WireframeGeometry(geometry);
-        const wireframeMaterial = new THREE.LineBasicMaterial({
-            color: 0x00ff00,
-            transparent: true,
-            opacity: 0.1
-        });
-        this.wireframe = new THREE.LineSegments(wireframeGeometry, wireframeMaterial);
-        this.mesh.add(this.wireframe);
+        // Add the mesh to the scene
+        this.scene.add(this.mesh);
         
         console.log("Planet mesh created:", this.mesh);
     }

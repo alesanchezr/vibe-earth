@@ -2,6 +2,7 @@
  * Sky class for handling sky, sun, and day/night cycle
  */
 import * as THREE from 'three';
+import { ApiClient } from './api-client.js';
 
 export class Sky {
     /**
@@ -44,6 +45,7 @@ export class Sky {
         this.createLights();
         
         // Sync with server time
+        this.apiClient = new ApiClient();
         this.syncWithServer().then(() => {
             // Now that we have the time, update everything
             this.isInitialized = true;
@@ -210,10 +212,6 @@ export class Sky {
         
         this.scene.add(this.directionalLight);
         
-        // Add a helper to visualize the light
-        const helper = new THREE.DirectionalLightHelper(this.directionalLight, 1000);
-        this.scene.add(helper);
-        
         // Add a subtle hemisphere light for better planet illumination
         this.hemisphereLight = new THREE.HemisphereLight(0xf0f8ff, 0x080820, 0.3);
         this.scene.add(this.hemisphereLight);
@@ -246,13 +244,7 @@ export class Sky {
      */
     async syncWithServer() {
         try {
-            const response = await fetch('/api/stats');
-            
-            if (!response.ok) {
-                throw new Error(`Server returned ${response.status}: ${response.statusText}`);
-            }
-            
-            const data = await response.json();
+            const data = await this.apiClient.getStats();
             
             if (data && data.day_night_cycle) {
                 const { duration, current } = data.day_night_cycle;

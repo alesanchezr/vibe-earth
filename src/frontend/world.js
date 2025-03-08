@@ -134,10 +134,6 @@ export class World {
         // The sky will automatically sync with the server
         // No need to call initTimeOfDay() anymore
         
-        // Add axes helper for debugging
-        const axesHelper = new THREE.AxesHelper(5000);
-        this.scene.add(axesHelper);
-        
         // Set up orbit controls
         this.controls = new OrbitControls(this.camera, this.renderer.domElement);
         this.controls.enableDamping = true; // Add smooth damping
@@ -225,21 +221,25 @@ export class World {
     }
     
     /**
-     * Update the zoom indicator display
+     * Update the zoom indicator with the current camera height
      */
     updateZoomIndicator() {
         const zoomValueElement = document.getElementById('zoom-value');
         const fovValueElement = document.getElementById('fov-value');
         
-        if (zoomValueElement) {
-            // Calculate height in km based on zoom level
-            const height = (this.config.maxHeight * this.zoomLevel).toFixed(1);
-            zoomValueElement.textContent = height;
+        if (zoomValueElement && this.camera) {
+            // Calculate actual height above the planet surface in km
+            const distanceFromCenter = this.camera.position.length();
+            const heightAboveSurface = distanceFromCenter - this.config.planetRadius;
+            
+            // Convert to km and format to 1 decimal place
+            const heightInKm = (heightAboveSurface / 1000).toFixed(1);
+            zoomValueElement.textContent = heightInKm;
         }
         
-        if (fovValueElement) {
-            // Calculate FOV based on zoom level
-            const fov = Math.round(60 / this.zoomLevel);
+        if (fovValueElement && this.camera) {
+            // Display the actual camera FOV
+            const fov = Math.round(this.camera.fov);
             fovValueElement.textContent = fov;
         }
     }
@@ -365,11 +365,19 @@ export class World {
             z: userData.position_z
         };
         
+        // Ensure color is in the correct format
+        let color = userData.color;
+        
+        // If color is a string that looks like a number, convert it to a number
+        if (typeof color === 'string' && !isNaN(color)) {
+            color = Number(color);
+        }
+        
         // Create the new user
         const user = new Geek({
             id: userData.id,
             size: userData.size,
-            color: userData.color,
+            color: color,
             position: position,
             scene: this.scene,
             cameraY: this.camera.position.y,
@@ -535,10 +543,8 @@ export class World {
         // Update orbit controls
         this.controls.update();
         
-        // Update zoom indicator occasionally
-        if (Math.random() < 0.05) {
-            this.updateZoomIndicator();
-        }
+        // Update zoom indicator with current camera height
+        this.updateZoomIndicator();
         
         // Update all users
         for (const user of this.users) {
@@ -555,7 +561,6 @@ export class World {
         
         // Render the scene
         this.renderer.render(this.scene, this.camera);
-        
     }
     
     /**

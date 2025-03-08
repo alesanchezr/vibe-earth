@@ -25,7 +25,46 @@ export class Geek {
         
         this.id = options.id; // May be undefined for locally created geeks
         this.size = options.size;
-        this.color = options.color;
+        
+        // Debug the color value
+        console.log("Color value:", options.color, "Type:", typeof options.color);
+        
+        // Convert color to THREE.Color object immediately
+        try {
+            // Handle specific problematic color values
+            if (options.color === 4359668 || options.color === 3450963 || options.color === 10233776) {
+                // These specific color values are causing issues, map them to known good colors
+                const colorMap = {
+                    4359668: "#428A4F",  // Green
+                    3450963: "#34A853",  // Green
+                    10233776: "#9C27B0"  // Purple
+                };
+                console.log(`Handling problematic color value ${options.color}`);
+                this.color = new THREE.Color(colorMap[options.color]);
+            }
+            // Handle numeric color values
+            else if (typeof options.color === 'number') {
+                // Convert number to hex string (e.g., 0xFF0000 to "#FF0000")
+                const hexString = '#' + options.color.toString(16).padStart(6, '0');
+                console.log("Converted to hex string:", hexString);
+                this.color = new THREE.Color(hexString);
+            }
+            // Handle existing THREE.Color objects
+            else if (options.color instanceof THREE.Color) {
+                console.log("Already a THREE.Color");
+                this.color = options.color;
+            }
+            // Handle other formats (strings, etc.)
+            else {
+                console.log("Creating new THREE.Color from:", options.color);
+                this.color = new THREE.Color(options.color);
+            }
+        } catch (error) {
+            console.error("Error creating THREE.Color:", error);
+            // Fallback to a default color
+            this.color = new THREE.Color("#4285F4"); // Default to blue
+        }
+        
         this.planetRadius = options.planetRadius || 3000;
         
         // Store the position on the planet surface
@@ -90,6 +129,13 @@ export class Geek {
         // Orient the mesh to face away from the planet center
         this.orientToSurface();
         
+        // Create comet tail effect
+        this.cometTail = this.createCometTail();
+        
+        // Initialize timer for particle emission
+        this.lastParticleTime = 0;
+        this.particleEmissionRate = 0.2; // Particles per second
+        
         console.log("Geek created successfully with ID:", this.id);
     }
     
@@ -145,7 +191,7 @@ export class Geek {
             color: this.color,
             transparent: true,
             opacity: 0.9,
-            emissive: new THREE.Color(this.color).multiplyScalar(0.2), // Slight self-illumination
+            emissive: this.color.clone().multiplyScalar(0.2), // Slight self-illumination
             emissiveIntensity: 0.2,
             reflectivity: 0,
             flatShading: false
@@ -186,9 +232,9 @@ export class Geek {
         // Eye whites
         const eyeGeometry = new THREE.SphereGeometry(eyeSize, 8, 8);
         const eyeMaterial = new THREE.MeshLambertMaterial({
-            color: 0xffffff,
+            color: new THREE.Color(0xffffff),
             transparent: false,
-            emissive: 0x444444,
+            emissive: new THREE.Color(0x444444),
             emissiveIntensity: 0.1
         });
         
@@ -205,7 +251,7 @@ export class Geek {
         // Pupils (small black spheres)
         const pupilSize = eyeSize * 0.5;
         const pupilGeometry = new THREE.SphereGeometry(pupilSize, 6, 6);
-        const pupilMaterial = new THREE.MeshBasicMaterial({ color: 0x000000 });
+        const pupilMaterial = new THREE.MeshBasicMaterial({ color: new THREE.Color(0x000000) });
         
         // Left pupil
         const leftPupil = new THREE.Mesh(pupilGeometry, pupilMaterial);
@@ -230,7 +276,7 @@ export class Geek {
         );
         
         const mouthGeometry = new THREE.TubeGeometry(curve, 10, mouthHeight * 0.3, 8, false);
-        const mouthMaterial = new THREE.MeshBasicMaterial({ color: 0x000000 });
+        const mouthMaterial = new THREE.MeshBasicMaterial({ color: new THREE.Color(0x000000) });
         const mouth = new THREE.Mesh(mouthGeometry, mouthMaterial);
         
         group.add(mouth);
@@ -240,7 +286,7 @@ export class Geek {
             const cheekSize = this.size * 0.15;
             const cheekGeometry = new THREE.SphereGeometry(cheekSize, 8, 8);
             const cheekMaterial = new THREE.MeshLambertMaterial({
-                color: 0xff9999,
+                color: new THREE.Color(0xff9999),
                 transparent: true,
                 opacity: 0.6
             });
@@ -288,6 +334,16 @@ export class Geek {
         // Update mesh position
         this.mesh.position.set(this.position.x, this.position.y, this.position.z);
         
+        // Update comet tail
+        this.updateCometTail();
+        
+        // Possibly emit a trailing particle
+        this.lastParticleTime += deltaTime;
+        if (this.lastParticleTime > 1 / this.particleEmissionRate) {
+            this.emitTrailingParticle();
+            this.lastParticleTime = 0;
+        }
+        
         // Orient to face away from the planet center
         this.orientToSurface();
         
@@ -319,6 +375,12 @@ export class Geek {
             // Orient to face away from the planet center
             this.orientToSurface();
             
+            // Remove comet tail
+            if (this.cometTail) {
+                this.scene.remove(this.cometTail);
+                this.cometTail = null;
+            }
+            
             // Create dust particles
             this.createDustParticles(15);
             
@@ -330,6 +392,9 @@ export class Geek {
             
             // Animate the entry
             this.animateEntry();
+            
+            // Create a circular wave animation when the geek drops onto the planet
+            this.createDropWave();
         }
     }
     
@@ -967,6 +1032,12 @@ export class Geek {
             this.updatePhysics(deltaTime);
         } else {
             this.updateFloating(time);
+            
+            // If we still have a comet tail after landing, remove it
+            if (this.cometTail) {
+                this.scene.remove(this.cometTail);
+                this.cometTail = null;
+            }
         }
     }
     
@@ -1022,5 +1093,361 @@ export class Geek {
             // Clear references
             this.mesh = null;
         }
+        
+        // Remove comet tail if it exists
+        if (this.cometTail) {
+            this.scene.remove(this.cometTail);
+            
+            // Dispose of geometries and materials
+            this.cometTail.traverse(child => {
+                if (child.geometry) child.geometry.dispose();
+                if (child.material) {
+                    if (Array.isArray(child.material)) {
+                        child.material.forEach(material => material.dispose());
+                    } else {
+                        child.material.dispose();
+                    }
+                }
+            });
+            
+            this.cometTail = null;
+        }
+    }
+    
+    /**
+     * Create a circular wave animation when the geek drops onto the planet
+     */
+    createDropWave() {
+        // Create a single wave for simplicity
+        const wavePosition = new THREE.Vector3().copy(this.position);
+        
+        // Create a ring geometry for the wave - keep it extremely small relative to geek size
+        const ringGeometry = new THREE.RingGeometry(this.size * 0.075, this.size * 0.1, 12);
+        
+        // Create a material for the wave - increase opacity for more visibility
+        const ringMaterial = new THREE.MeshBasicMaterial({
+            color: this.color,
+            transparent: true,
+            opacity: 0.8, // Increased opacity for brightness
+            side: THREE.DoubleSide
+        });
+        
+        // Create the wave mesh
+        const ring = new THREE.Mesh(ringGeometry, ringMaterial);
+        
+        // Position the ring at the geek's position
+        ring.position.copy(wavePosition);
+        
+        // By default, ring geometry is created in the XY plane
+        // We need to rotate it 90 degrees around X axis to make it perpendicular to Y
+        ring.rotation.x = Math.PI / 2;
+        
+        // Then orient it to match the normal of the planet surface
+        // Create a rotation matrix that aligns the ring with the surface normal
+        const upVector = new THREE.Vector3(0, 1, 0);
+        const normalizedNormal = this.normal.clone().normalize();
+        
+        // Only apply rotation if normal is not already aligned with up vector
+        if (Math.abs(normalizedNormal.dot(upVector)) < 0.99) {
+            const rotationAxis = new THREE.Vector3().crossVectors(upVector, normalizedNormal).normalize();
+            const angle = Math.acos(upVector.dot(normalizedNormal));
+            ring.rotateOnAxis(rotationAxis, angle);
+        }
+        
+        // Add the ring to the scene
+        this.scene.add(ring);
+        
+        // Store the creation time
+        const startTime = Date.now();
+        const duration = 500; // Keep the short animation duration
+        const maxScale = this.size * 0.75; // Keep the small maximum scale
+        
+        // Create an animation function that will be called on each frame
+        const animateRing = () => {
+            // Calculate how much time has passed
+            const elapsedTime = Date.now() - startTime;
+            const progress = Math.min(elapsedTime / duration, 1);
+            
+            // Use easeOutQuad for smoother animation
+            const easeOutProgress = 1 - (1 - progress) * (1 - progress);
+            
+            // Calculate the current scale based on progress
+            const currentScale = easeOutProgress * maxScale;
+            
+            // Apply the scale to the ring
+            ring.scale.set(currentScale, currentScale, 1);
+            
+            // Calculate opacity (starts at 0.8, fades to 0)
+            const opacity = 0.8 * (1 - easeOutProgress);
+            ringMaterial.opacity = opacity;
+            
+            // Continue the animation if not complete
+            if (progress < 1) {
+                requestAnimationFrame(animateRing);
+            } else {
+                // Clean up when animation is complete
+                this.scene.remove(ring);
+                ringGeometry.dispose();
+                ringMaterial.dispose();
+            }
+        };
+        
+        // Start the animation
+        animateRing();
+        
+        // Create a second wave with slight delay for better effect
+        setTimeout(() => {
+            if (!this.mesh) return; // Safety check in case geek was removed
+            
+            const ringGeometry2 = new THREE.RingGeometry(this.size * 0.09, this.size * 0.115, 12);
+            const ringMaterial2 = new THREE.MeshBasicMaterial({
+                color: this.color,
+                transparent: true,
+                opacity: 0.7, // Increased opacity for second ring
+                side: THREE.DoubleSide
+            });
+            
+            const ring2 = new THREE.Mesh(ringGeometry2, ringMaterial2);
+            ring2.position.copy(wavePosition);
+            
+            // Apply the same rotation to the second ring
+            ring2.rotation.x = Math.PI / 2;
+            
+            // Apply the same orientation as the first ring
+            if (Math.abs(normalizedNormal.dot(upVector)) < 0.99) {
+                const rotationAxis = new THREE.Vector3().crossVectors(upVector, normalizedNormal).normalize();
+                const angle = Math.acos(upVector.dot(normalizedNormal));
+                ring2.rotateOnAxis(rotationAxis, angle);
+            }
+            
+            this.scene.add(ring2);
+            
+            const startTime2 = Date.now();
+            const duration2 = 600; // Keep the short duration for second wave
+            
+            const animateRing2 = () => {
+                const elapsedTime = Date.now() - startTime2;
+                const progress = Math.min(elapsedTime / duration2, 1);
+                const easeOutProgress = 1 - (1 - progress) * (1 - progress);
+                
+                const currentScale = easeOutProgress * maxScale * 0.6; // Smaller scale for second wave
+                ring2.scale.set(currentScale, currentScale, 1);
+                
+                const opacity = 0.7 * (1 - easeOutProgress);
+                ringMaterial2.opacity = opacity;
+                
+                if (progress < 1) {
+                    requestAnimationFrame(animateRing2);
+                } else {
+                    this.scene.remove(ring2);
+                    ringGeometry2.dispose();
+                    ringMaterial2.dispose();
+                }
+            };
+            
+            animateRing2();
+        }, 60); // Keep the short delay between waves
+    }
+    
+    /**
+     * Create a comet-like tail effect for the falling geek
+     * @returns {THREE.Object3D} The comet tail object
+     */
+    createCometTail() {
+        // Create a group to hold the tail particles
+        const tailGroup = new THREE.Group();
+        this.scene.add(tailGroup);
+        
+        // Number of particles in the tail
+        const particleCount = 25;
+        
+        // Create a slightly lighter color for the tail start
+        const tailStartColor = new THREE.Color(this.color).multiplyScalar(1.2);
+        
+        // Create particles for the tail
+        for (let i = 0; i < particleCount; i++) {
+            // Size decreases as we go further back in the tail
+            const sizeFactor = 1 - (i / particleCount) * 0.8;
+            const particleSize = this.size * 0.8 * sizeFactor;
+            
+            // Calculate color - gradient from lighter to original color
+            const t = i / particleCount;
+            const particleColor = new THREE.Color().lerpColors(
+                tailStartColor,
+                this.color,
+                t
+            );
+            
+            // Create particle geometry and material
+            const particleGeometry = new THREE.SphereGeometry(particleSize, 8, 8);
+            const particleMaterial = new THREE.MeshBasicMaterial({
+                color: particleColor,
+                transparent: true,
+                opacity: 0.8 * (1 - i / particleCount), // Fade out towards the end of the tail
+                depthWrite: false // Prevent z-fighting
+            });
+            
+            // Create the particle mesh
+            const particle = new THREE.Mesh(particleGeometry, particleMaterial);
+            particle.renderOrder = 5; // Ensure it renders behind the geek
+            
+            // Store the index for position calculation
+            particle.userData.index = i;
+            
+            // Add to the tail group
+            tailGroup.add(particle);
+        }
+        
+        // Store the previous positions for the tail effect
+        this.previousPositions = [];
+        
+        // Add a subtle glow effect at the head of the tail
+        const glowGeometry = new THREE.SphereGeometry(this.size * 1.2, 16, 16);
+        const glowMaterial = new THREE.MeshBasicMaterial({
+            color: tailStartColor,
+            transparent: true,
+            opacity: 0.3,
+            depthWrite: false,
+            blending: THREE.AdditiveBlending
+        });
+        
+        const glowMesh = new THREE.Mesh(glowGeometry, glowMaterial);
+        glowMesh.userData.isGlow = true;
+        tailGroup.add(glowMesh);
+        
+        return tailGroup;
+    }
+    
+    /**
+     * Update the comet tail positions based on the geek's movement
+     */
+    updateCometTail() {
+        if (!this.cometTail) return;
+        
+        // Add current position to the history
+        this.previousPositions.unshift({
+            x: this.position.x,
+            y: this.position.y,
+            z: this.position.z
+        });
+        
+        // Limit the history length
+        const maxHistory = 25;
+        if (this.previousPositions.length > maxHistory) {
+            this.previousPositions = this.previousPositions.slice(0, maxHistory);
+        }
+        
+        // Update each particle in the tail
+        this.cometTail.children.forEach(particle => {
+            // Handle the glow effect separately
+            if (particle.userData.isGlow) {
+                particle.position.set(this.position.x, this.position.y, this.position.z);
+                return;
+            }
+            
+            const index = particle.userData.index;
+            
+            // Calculate position based on index
+            // Higher indices = further back in the tail
+            if (index < this.previousPositions.length) {
+                const pos = this.previousPositions[index];
+                
+                // Add a slight offset to create a more interesting trail
+                // The offset increases as we go further back in the tail
+                const offsetFactor = index / this.previousPositions.length;
+                const offset = new THREE.Vector3(
+                    (Math.sin(index * 0.5) * offsetFactor * this.size * 0.5),
+                    (Math.cos(index * 0.5) * offsetFactor * this.size * 0.5),
+                    (Math.sin(index * 0.3) * offsetFactor * this.size * 0.5)
+                );
+                
+                particle.position.set(
+                    pos.x + offset.x,
+                    pos.y + offset.y,
+                    pos.z + offset.z
+                );
+                
+                // Make sure the particle is visible
+                particle.visible = true;
+            } else {
+                // If we don't have enough history yet, hide the particle
+                particle.visible = false;
+            }
+        });
+    }
+    
+    /**
+     * Emit a small trailing particle that breaks off from the comet tail
+     */
+    emitTrailingParticle() {
+        if (!this.cometTail || this.previousPositions.length < 5) return;
+        
+        // Choose a random position from the tail (not too close to the head)
+        const minIndex = 3;
+        const maxIndex = Math.min(10, this.previousPositions.length - 1);
+        const index = minIndex + Math.floor(Math.random() * (maxIndex - minIndex));
+        
+        // Get the position from the tail
+        const pos = this.previousPositions[index];
+        
+        // Create a small particle
+        const particleSize = this.size * 0.2 + Math.random() * this.size * 0.1;
+        const particleGeometry = new THREE.SphereGeometry(particleSize, 6, 6);
+        
+        // Use a color between the tail start and end
+        const t = index / this.previousPositions.length;
+        const tailStartColor = new THREE.Color(this.color).multiplyScalar(1.2);
+        const particleColor = new THREE.Color().lerpColors(
+            tailStartColor,
+            this.color,
+            t
+        );
+        
+        const particleMaterial = new THREE.MeshBasicMaterial({
+            color: particleColor,
+            transparent: true,
+            opacity: 0.6,
+            depthWrite: false
+        });
+        
+        const particle = new THREE.Mesh(particleGeometry, particleMaterial);
+        
+        // Position at the chosen point in the tail
+        particle.position.set(pos.x, pos.y, pos.z);
+        
+        // Add some random velocity
+        const velocity = new THREE.Vector3(
+            (Math.random() - 0.5) * 20,
+            (Math.random() - 0.5) * 20,
+            (Math.random() - 0.5) * 20
+        );
+        
+        // Add to scene
+        this.scene.add(particle);
+        
+        // Animate the particle
+        const duration = 500 + Math.random() * 500;
+        
+        // Move the particle
+        new TWEEN.Tween(particle.position)
+            .to({
+                x: particle.position.x + velocity.x,
+                y: particle.position.y + velocity.y,
+                z: particle.position.z + velocity.z
+            }, duration)
+            .easing(TWEEN.Easing.Cubic.Out)
+            .start();
+        
+        // Fade out
+        new TWEEN.Tween(particleMaterial)
+            .to({ opacity: 0 }, duration)
+            .easing(TWEEN.Easing.Cubic.In)
+            .onComplete(() => {
+                // Remove the particle when animation completes
+                this.scene.remove(particle);
+                particleGeometry.dispose();
+                particleMaterial.dispose();
+            })
+            .start();
     }
 } 

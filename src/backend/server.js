@@ -259,7 +259,7 @@ wss.on('connection', (ws) => {
 async function sendInitialData(ws) {
   try {
     // Get all users from the database
-    const result = await db.query('SELECT * FROM geeks ORDER BY created_at DESC LIMIT 100');
+    const result = await db.query('SELECT * FROM geeks WHERE active = true ORDER BY created_at DESC LIMIT 100');
     const users = result.rows;
     
     // Send the initial data
