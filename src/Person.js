@@ -65,16 +65,21 @@ export class Person {
     }
     
     /**
-     * Create the mesh for this person
-     * @returns {THREE.Mesh} The created mesh
+     * Create the mesh for this person as a cute water drop with a face
+     * @returns {THREE.Group} The created mesh group
      */
     createMesh() {
-        // Create a 3D cylinder for the person
-        const height = this.size * 2;
-        const geometry = new THREE.CylinderGeometry(this.size, this.size * 1.2, height, 16);
+        // Create a group to hold all the parts of the water drop
+        const group = new THREE.Group();
+        
+        // Create the main water drop body (teardrop shape)
+        const dropGeometry = new THREE.SphereGeometry(this.size, 16, 16);
+        
+        // Slightly squash the sphere to make it more drop-like
+        dropGeometry.scale(1, 1.2, 1);
         
         // Create material with no specular highlights to prevent whitish appearance
-        const material = new THREE.MeshLambertMaterial({
+        const dropMaterial = new THREE.MeshLambertMaterial({
             color: this.color,
             transparent: true,
             opacity: 0.9,
@@ -84,33 +89,209 @@ export class Person {
             flatShading: false
         });
         
-        const mesh = new THREE.Mesh(geometry, material);
+        const dropBody = new THREE.Mesh(dropGeometry, dropMaterial);
         
-        // Adjust the position so the bottom of the cylinder is at y=0 when on ground
-        mesh.position.y = height / 2;
+        // Add a slight taper at the top for a water drop look
+        dropBody.scale.set(1, 1, 1);
+        dropBody.position.y = this.size * 0.2; // Raise slightly to account for the taper
+        
+        // Add the body to the group
+        group.add(dropBody);
+        
+        // Create the face (only visible when zoomed in)
+        this.createFace(group);
+        
+        // Position the entire group so the bottom of the drop is at y=0
+        group.position.y = this.size;
         
         // Add a slight random rotation for more visual interest
-        mesh.rotation.y = Math.random() * Math.PI * 2;
+        group.rotation.y = Math.random() * Math.PI * 2;
         
-        return mesh;
+        return group;
+    }
+    
+    /**
+     * Create a cute face for the water drop
+     * @param {THREE.Group} group The group to add the face to
+     */
+    createFace(group) {
+        // Create eyes (white spheres with black pupils)
+        const eyeSize = this.size * 0.2;
+        const eyeSpacing = this.size * 0.3;
+        const eyeHeight = this.size * 0.3;
+        const eyeForward = this.size * 0.7; // Position eyes toward the front
+        
+        // Eye whites
+        const eyeGeometry = new THREE.SphereGeometry(eyeSize, 8, 8);
+        const eyeMaterial = new THREE.MeshLambertMaterial({
+            color: 0xffffff,
+            transparent: false,
+            emissive: 0x444444,
+            emissiveIntensity: 0.1
+        });
+        
+        // Left eye
+        const leftEye = new THREE.Mesh(eyeGeometry, eyeMaterial);
+        leftEye.position.set(-eyeSpacing, eyeHeight, eyeForward);
+        group.add(leftEye);
+        
+        // Right eye
+        const rightEye = new THREE.Mesh(eyeGeometry, eyeMaterial);
+        rightEye.position.set(eyeSpacing, eyeHeight, eyeForward);
+        group.add(rightEye);
+        
+        // Pupils (small black spheres)
+        const pupilSize = eyeSize * 0.5;
+        const pupilGeometry = new THREE.SphereGeometry(pupilSize, 6, 6);
+        const pupilMaterial = new THREE.MeshBasicMaterial({ color: 0x000000 });
+        
+        // Left pupil
+        const leftPupil = new THREE.Mesh(pupilGeometry, pupilMaterial);
+        leftPupil.position.set(0, 0, eyeSize * 0.6);
+        leftEye.add(leftPupil);
+        
+        // Right pupil
+        const rightPupil = new THREE.Mesh(pupilGeometry, pupilMaterial);
+        rightPupil.position.set(0, 0, eyeSize * 0.6);
+        rightEye.add(rightPupil);
+        
+        // Create a happy mouth (curved line)
+        const mouthWidth = this.size * 0.5;
+        const mouthHeight = this.size * 0.1;
+        const mouthY = eyeHeight - this.size * 0.4;
+        
+        // Create a smile using a curved tube geometry
+        const curve = new THREE.QuadraticBezierCurve3(
+            new THREE.Vector3(-mouthWidth/2, mouthY, eyeForward),
+            new THREE.Vector3(0, mouthY - mouthHeight, eyeForward + mouthHeight * 0.5),
+            new THREE.Vector3(mouthWidth/2, mouthY, eyeForward)
+        );
+        
+        const mouthGeometry = new THREE.TubeGeometry(curve, 10, mouthHeight * 0.3, 8, false);
+        const mouthMaterial = new THREE.MeshBasicMaterial({ color: 0x000000 });
+        const mouth = new THREE.Mesh(mouthGeometry, mouthMaterial);
+        
+        group.add(mouth);
+        
+        // Randomly add rosy cheeks to some water drops
+        if (Math.random() > 0.5) {
+            const cheekSize = this.size * 0.15;
+            const cheekGeometry = new THREE.SphereGeometry(cheekSize, 8, 8);
+            const cheekMaterial = new THREE.MeshLambertMaterial({
+                color: 0xff9999,
+                transparent: true,
+                opacity: 0.6
+            });
+            
+            // Left cheek
+            const leftCheek = new THREE.Mesh(cheekGeometry, cheekMaterial);
+            leftCheek.position.set(-eyeSpacing * 1.2, mouthY + cheekSize, eyeForward - cheekSize * 0.5);
+            group.add(leftCheek);
+            
+            // Right cheek
+            const rightCheek = new THREE.Mesh(cheekGeometry, cheekMaterial);
+            rightCheek.position.set(eyeSpacing * 1.2, mouthY + cheekSize, eyeForward - cheekSize * 0.5);
+            group.add(rightCheek);
+        }
     }
     
     /**
      * Start the floating animation after impact
      */
     animateEntry() {
-        // Create a subtle scale animation for impact
+        // Create a cute squash and stretch animation for impact
+        
+        // First, squash the water drop
         new TWEEN.Tween(this.mesh.scale)
-            .to({ x: 1.2, y: 0.8, z: 1.2 }, 100)
+            .to({ x: 1.3, y: 0.7, z: 1.3 }, 150)
             .easing(TWEEN.Easing.Cubic.Out)
             .onComplete(() => {
-                // Return to normal scale
+                // Then bounce back with a slight overshoot
                 new TWEEN.Tween(this.mesh.scale)
-                    .to({ x: 1, y: 1, z: 1 }, 300)
-                    .easing(TWEEN.Easing.Elastic.Out)
+                    .to({ x: 0.9, y: 1.2, z: 0.9 }, 150)
+                    .easing(TWEEN.Easing.Cubic.Out)
+                    .onComplete(() => {
+                        // Finally settle to normal scale
+                        new TWEEN.Tween(this.mesh.scale)
+                            .to({ x: 1, y: 1, z: 1 }, 200)
+                            .easing(TWEEN.Easing.Elastic.Out)
+                            .start();
+                    })
                     .start();
             })
             .start();
+        
+        // Make the water drop do a happy little wiggle
+        this.wiggleHappily();
+    }
+    
+    /**
+     * Make the water drop do a happy little wiggle
+     */
+    wiggleHappily() {
+        // Find the face parts
+        if (this.mesh.children.length < 3) return;
+        
+        // Wiggle the entire drop from side to side
+        const originalRotation = this.mesh.rotation.y;
+        const wiggleAmount = 0.2;
+        
+        // First wiggle left
+        new TWEEN.Tween(this.mesh.rotation)
+            .to({ y: originalRotation - wiggleAmount }, 150)
+            .easing(TWEEN.Easing.Cubic.Out)
+            .onComplete(() => {
+                // Then wiggle right
+                new TWEEN.Tween(this.mesh.rotation)
+                    .to({ y: originalRotation + wiggleAmount }, 300)
+                    .easing(TWEEN.Easing.Cubic.InOut)
+                    .onComplete(() => {
+                        // Then back to center
+                        new TWEEN.Tween(this.mesh.rotation)
+                            .to({ y: originalRotation }, 150)
+                            .easing(TWEEN.Easing.Cubic.In)
+                            .start();
+                    })
+                    .start();
+            })
+            .start();
+        
+        // Make the eyes do a happy squint
+        setTimeout(() => {
+            const leftEye = this.mesh.children[1];
+            const rightEye = this.mesh.children[2];
+            
+            if (leftEye && rightEye) {
+                // Squint eyes (scale down vertically, scale up horizontally)
+                new TWEEN.Tween(leftEye.scale)
+                    .to({ y: 0.6, x: 1.2, z: 1.2 }, 300)
+                    .easing(TWEEN.Easing.Cubic.Out)
+                    .onComplete(() => {
+                        // Return to normal after a delay
+                        setTimeout(() => {
+                            new TWEEN.Tween(leftEye.scale)
+                                .to({ y: 1, x: 1, z: 1 }, 300)
+                                .easing(TWEEN.Easing.Cubic.InOut)
+                                .start();
+                        }, 500);
+                    })
+                    .start();
+                    
+                new TWEEN.Tween(rightEye.scale)
+                    .to({ y: 0.6, x: 1.2, z: 1.2 }, 300)
+                    .easing(TWEEN.Easing.Cubic.Out)
+                    .onComplete(() => {
+                        // Return to normal after a delay
+                        setTimeout(() => {
+                            new TWEEN.Tween(rightEye.scale)
+                                .to({ y: 1, x: 1, z: 1 }, 300)
+                                .easing(TWEEN.Easing.Cubic.InOut)
+                                .start();
+                        }, 500);
+                    })
+                    .start();
+            }
+        }, 150);
     }
     
     /**
@@ -156,7 +337,23 @@ export class Person {
         }
         
         // Update mesh position
-        this.mesh.position.set(this.position.x, this.position.y + this.size, this.position.z);
+        this.mesh.position.x = this.position.x;
+        this.mesh.position.z = this.position.z;
+        
+        // For water drops, we want to keep the bottom at ground level
+        // The group's y position is already set to this.size in createMesh
+        this.mesh.position.y = this.position.y;
+        
+        // Add a slight wobble to the water drop as it falls
+        if (this.velocity.y < -100) {
+            const wobbleAmount = Math.min(Math.abs(this.velocity.y) / 1000, 0.2);
+            const wobbleFreq = 10;
+            const wobble = Math.sin(Date.now() * 0.01 * wobbleFreq) * wobbleAmount;
+            
+            // Squash and stretch based on velocity
+            this.mesh.scale.y = 1 - wobbleAmount + wobble;
+            this.mesh.scale.x = this.mesh.scale.z = 1 + wobbleAmount * 0.5 - wobble * 0.5;
+        }
     }
     
     /**
@@ -322,19 +519,110 @@ export class Person {
         // Stop floating
         this.isFloating = false;
         
-        // Animate moving up and fading out
-        const startY = this.mesh.position.y;
+        // Make the water drop look surprised
+        this.lookSurprised();
         
-        new TWEEN.Tween(this.mesh.position)
-            .to({ y: startY + 100 }, 1000)
-            .easing(TWEEN.Easing.Quadratic.Out)
-            .start();
+        // After the surprised look, start rising and fading
+        setTimeout(() => {
+            // Animate moving up and fading out
+            const startY = this.mesh.position.y;
             
-        new TWEEN.Tween(this.mesh.material)
-            .to({ opacity: 0 }, 1000)
-            .easing(TWEEN.Easing.Quadratic.Out)
+            // First, make the drop stretch upward as if being pulled
+            new TWEEN.Tween(this.mesh.scale)
+                .to({ y: 1.5, x: 0.8, z: 0.8 }, 400)
+                .easing(TWEEN.Easing.Cubic.Out)
+                .start();
+            
+            // Then move upward
+            new TWEEN.Tween(this.mesh.position)
+                .to({ y: startY + 150 }, 1000)
+                .easing(TWEEN.Easing.Cubic.InOut)
+                .start();
+            
+            // Find the body (first child)
+            const body = this.mesh.children[0];
+            if (body && body.material) {
+                // Fade out the body
+                new TWEEN.Tween(body.material)
+                    .to({ opacity: 0 }, 800)
+                    .easing(TWEEN.Easing.Cubic.In)
+                    .delay(200)
+                    .onComplete(() => {
+                        if (onComplete) onComplete();
+                    })
+                    .start();
+            } else {
+                // Fallback if body not found
+                setTimeout(() => {
+                    if (onComplete) onComplete();
+                }, 1000);
+            }
+            
+            // Add a spin as it rises
+            new TWEEN.Tween(this.mesh.rotation)
+                .to({ y: this.mesh.rotation.y + Math.PI * 2 }, 1000)
+                .easing(TWEEN.Easing.Cubic.InOut)
+                .start();
+        }, 500);
+    }
+    
+    /**
+     * Make the water drop look surprised
+     */
+    lookSurprised() {
+        // Find the face parts
+        if (this.mesh.children.length < 4) return;
+        
+        const leftEye = this.mesh.children[1];
+        const rightEye = this.mesh.children[2];
+        const mouth = this.mesh.children[3];
+        
+        if (leftEye && rightEye) {
+            // Make eyes wide with surprise
+            new TWEEN.Tween(leftEye.scale)
+                .to({ y: 1.5, x: 1.5, z: 1.5 }, 300)
+                .easing(TWEEN.Easing.Elastic.Out)
+                .start();
+                
+            new TWEEN.Tween(rightEye.scale)
+                .to({ y: 1.5, x: 1.5, z: 1.5 }, 300)
+                .easing(TWEEN.Easing.Elastic.Out)
+                .start();
+        }
+        
+        if (mouth) {
+            // Change mouth to an "O" shape of surprise
+            // First, remove the current mouth
+            this.mesh.remove(mouth);
+            mouth.geometry.dispose();
+            mouth.material.dispose();
+            
+            // Create a circular mouth
+            const mouthRadius = this.size * 0.15;
+            const mouthGeometry = new THREE.CircleGeometry(mouthRadius, 16);
+            const mouthMaterial = new THREE.MeshBasicMaterial({ color: 0x000000 });
+            const newMouth = new THREE.Mesh(mouthGeometry, mouthMaterial);
+            
+            // Position the mouth
+            const eyeHeight = this.size * 0.3;
+            const eyeForward = this.size * 0.7;
+            const mouthY = eyeHeight - this.size * 0.4;
+            newMouth.position.set(0, mouthY, eyeForward);
+            newMouth.rotation.y = Math.PI; // Face forward
+            
+            this.mesh.add(newMouth);
+        }
+        
+        // Add a little jump of surprise
+        const currentY = this.mesh.position.y;
+        new TWEEN.Tween(this.mesh.position)
+            .to({ y: currentY + this.size * 0.5 }, 150)
+            .easing(TWEEN.Easing.Cubic.Out)
             .onComplete(() => {
-                if (onComplete) onComplete();
+                new TWEEN.Tween(this.mesh.position)
+                    .to({ y: currentY }, 150)
+                    .easing(TWEEN.Easing.Cubic.In)
+                    .start();
             })
             .start();
     }
@@ -346,14 +634,215 @@ export class Person {
     updateFloating(time) {
         if (!this.isFloating) return;
         
+        // Initialize wandering properties if they don't exist
+        if (!this.wanderProperties) {
+            this.initializeWandering();
+        }
+        
         // Calculate floating height based on sine wave
         const floatHeight = this.floatAmplitude * Math.sin(time * this.floatSpeed + this.floatOffset);
         
-        // Apply to mesh position
+        // Apply wandering movement
+        this.updateWandering(time);
+        
+        // Apply to mesh position (y position is handled separately for floating)
         this.mesh.position.y = this.originalY + this.size + floatHeight;
         
+        // Add a gentle bobbing effect to the water drop
+        const bobAmount = 0.05;
+        const bobFreq = 1.5;
+        const bob = Math.sin(time * bobFreq + this.floatOffset * 2) * bobAmount;
+        
+        // Squash and stretch slightly for a more lively water drop
+        this.mesh.scale.y = 1 + bob;
+        this.mesh.scale.x = this.mesh.scale.z = 1 - bob * 0.5;
+        
         // Add a gentle rotation
-        this.mesh.rotation.y += 0.01;
+        this.mesh.rotation.y += 0.005;
+        
+        // Make the eyes blink occasionally
+        if (Math.random() < 0.002) {
+            this.blinkEyes();
+        }
+        
+        // Occasionally change wandering direction
+        if (Math.random() < 0.01) {
+            this.changeWanderingDirection();
+        }
+    }
+    
+    /**
+     * Initialize wandering properties
+     */
+    initializeWandering() {
+        this.wanderProperties = {
+            // Store initial drop position
+            initialX: this.position.x,
+            initialZ: this.position.z,
+            // Current position is already set
+            // Maximum distance to wander from initial position (in feet/units)
+            maxDistance: this.size * 3 + Math.random() * this.size * 2, // 3-5x size
+            // Current direction of movement (radians)
+            direction: Math.random() * Math.PI * 2,
+            // Speed of movement
+            speed: 0.2 + Math.random() * 0.3, // Slow, gentle movement
+            // Time until next direction change
+            directionChangeTime: 0,
+            // Whether currently moving or paused
+            isMoving: Math.random() > 0.3, // 70% chance to start moving
+            // Time until next movement state change
+            stateChangeTime: 5 + Math.random() * 5
+        };
+    }
+    
+    /**
+     * Update the wandering movement
+     * @param {number} time Current time in seconds
+     */
+    updateWandering(time) {
+        const wp = this.wanderProperties;
+        
+        // Check if it's time to change movement state (moving/paused)
+        if (wp.stateChangeTime <= time) {
+            wp.isMoving = !wp.isMoving;
+            wp.stateChangeTime = time + 3 + Math.random() * 7; // Change state every 3-10 seconds
+            
+            // If starting to move, pick a new direction
+            if (wp.isMoving) {
+                this.changeWanderingDirection();
+                
+                // Do a little "getting ready to move" animation
+                this.prepareToMove();
+            }
+        }
+        
+        // Only move if in moving state
+        if (wp.isMoving) {
+            // Calculate new position
+            const moveStep = wp.speed * 0.1; // Small step size for smooth movement
+            const newX = this.position.x + Math.cos(wp.direction) * moveStep;
+            const newZ = this.position.z + Math.sin(wp.direction) * moveStep;
+            
+            // Calculate distance from initial position
+            const dx = newX - wp.initialX;
+            const dz = newZ - wp.initialZ;
+            const distanceFromStart = Math.sqrt(dx * dx + dz * dz);
+            
+            // Only move if within max distance, otherwise change direction
+            if (distanceFromStart <= wp.maxDistance) {
+                this.position.x = newX;
+                this.position.z = newZ;
+                this.mesh.position.x = newX;
+                this.mesh.position.z = newZ;
+                
+                // Rotate to face movement direction
+                const targetRotation = wp.direction + Math.PI / 2; // Add 90 degrees to face direction of travel
+                this.mesh.rotation.y = this.smoothRotation(this.mesh.rotation.y, targetRotation, 0.1);
+            } else {
+                // If we've reached the boundary, turn back toward center
+                const angleToCenter = Math.atan2(wp.initialZ - this.position.z, wp.initialX - this.position.x);
+                wp.direction = angleToCenter + (Math.random() - 0.5) * Math.PI * 0.5; // Add some randomness
+            }
+        }
+    }
+    
+    /**
+     * Change the wandering direction
+     */
+    changeWanderingDirection() {
+        const wp = this.wanderProperties;
+        
+        // If near the boundary, turn back toward center
+        const dx = this.position.x - wp.initialX;
+        const dz = this.position.z - wp.initialZ;
+        const distanceFromStart = Math.sqrt(dx * dx + dz * dz);
+        
+        if (distanceFromStart > wp.maxDistance * 0.7) {
+            // Close to max distance, turn back toward center
+            const angleToCenter = Math.atan2(wp.initialZ - this.position.z, wp.initialX - this.position.x);
+            wp.direction = angleToCenter + (Math.random() - 0.5) * Math.PI * 0.5; // Add some randomness
+        } else {
+            // Otherwise, choose a random new direction
+            wp.direction += (Math.random() - 0.5) * Math.PI; // Change by up to +/- 90 degrees
+        }
+    }
+    
+    /**
+     * Smooth rotation between angles
+     * @param {number} current Current angle
+     * @param {number} target Target angle
+     * @param {number} factor Smoothing factor (0-1)
+     * @returns {number} New angle
+     */
+    smoothRotation(current, target, factor) {
+        // Normalize angles
+        while (current > Math.PI) current -= Math.PI * 2;
+        while (current < -Math.PI) current += Math.PI * 2;
+        while (target > Math.PI) target -= Math.PI * 2;
+        while (target < -Math.PI) target += Math.PI * 2;
+        
+        // Find shortest direction
+        let delta = target - current;
+        if (delta > Math.PI) delta -= Math.PI * 2;
+        if (delta < -Math.PI) delta += Math.PI * 2;
+        
+        // Apply smoothing
+        return current + delta * factor;
+    }
+    
+    /**
+     * Animate preparation to move
+     */
+    prepareToMove() {
+        // Do a little anticipation squash before moving
+        new TWEEN.Tween(this.mesh.scale)
+            .to({ y: 0.9, x: 1.1, z: 1.1 }, 300)
+            .easing(TWEEN.Easing.Cubic.Out)
+            .onComplete(() => {
+                new TWEEN.Tween(this.mesh.scale)
+                    .to({ y: 1, x: 1, z: 1 }, 200)
+                    .easing(TWEEN.Easing.Cubic.Out)
+                    .start();
+            })
+            .start();
+    }
+    
+    /**
+     * Make the water drop blink its eyes
+     */
+    blinkEyes() {
+        // Find the eye meshes (first two children after the body)
+        const leftEye = this.mesh.children[1];
+        const rightEye = this.mesh.children[2];
+        
+        if (!leftEye || !rightEye) return;
+        
+        // Store original scale
+        const originalScaleY = leftEye.scale.y;
+        
+        // Close eyes (squash vertically)
+        new TWEEN.Tween(leftEye.scale)
+            .to({ y: 0.1 }, 100)
+            .easing(TWEEN.Easing.Cubic.Out)
+            .onComplete(() => {
+                // Open eyes
+                new TWEEN.Tween(leftEye.scale)
+                    .to({ y: originalScaleY }, 100)
+                    .easing(TWEEN.Easing.Cubic.Out)
+                    .start();
+            })
+            .start();
+            
+        new TWEEN.Tween(rightEye.scale)
+            .to({ y: 0.1 }, 100)
+            .easing(TWEEN.Easing.Cubic.Out)
+            .onComplete(() => {
+                new TWEEN.Tween(rightEye.scale)
+                    .to({ y: originalScaleY }, 100)
+                    .easing(TWEEN.Easing.Cubic.Out)
+                    .start();
+            })
+            .start();
     }
     
     /**
@@ -375,9 +864,9 @@ export class Person {
      */
     getPosition() {
         return {
-            x: this.mesh.position.x,
-            y: this.mesh.position.y,
-            z: this.mesh.position.z
+            x: this.position.x,
+            y: this.position.y,
+            z: this.position.z
         };
     }
     
@@ -388,8 +877,9 @@ export class Person {
      * @returns {boolean} True if collision detected
      */
     collidesWithPosition(position, otherRadius) {
-        const dx = this.mesh.position.x - position.x;
-        const dz = this.mesh.position.z - position.z;
+        // Use current position which may have changed due to wandering
+        const dx = this.position.x - position.x;
+        const dz = this.position.z - position.z;
         const distance = Math.sqrt(dx * dx + dz * dz);
         
         return distance < (this.size + otherRadius);
