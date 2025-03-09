@@ -37,15 +37,18 @@ export class ApiClient {
   
   /**
    * Add a random user
+   * @param {Object} options - Options for the random user
+   * @param {string} [options.client_id] - Client ID to associate with the user
    * @returns {Promise<Object>} Response with the new user data
    */
-  async addRandomUser() {
+  async addRandomUser(options = {}) {
     try {
       const response = await fetch(`${this.baseUrl}/api/users/random`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
-        }
+        },
+        body: JSON.stringify(options)
       });
       
       if (!response.ok) {
@@ -55,37 +58,6 @@ export class ApiClient {
       return await response.json();
     } catch (error) {
       console.error('Error adding random user:', error);
-      throw error;
-    }
-  }
-  
-  /**
-   * Add a custom user
-   * @param {Object} userData User data
-   * @param {number} userData.position_x X position
-   * @param {number} userData.position_y Y position
-   * @param {number} userData.position_z Z position
-   * @param {number} userData.size Size
-   * @param {string} userData.color Color
-   * @returns {Promise<Object>} Response with the new user data
-   */
-  async addCustomUser(userData) {
-    try {
-      const response = await fetch(`${this.baseUrl}/api/users`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(userData)
-      });
-      
-      if (!response.ok) {
-        throw new Error(`HTTP error ${response.status}`);
-      }
-      
-      return await response.json();
-    } catch (error) {
-      console.error('Error adding custom user:', error);
       throw error;
     }
   }
@@ -110,6 +82,33 @@ export class ApiClient {
       return await response.json();
     } catch (error) {
       console.error('Error truncating users:', error);
+      throw error;
+    }
+  }
+  
+  /**
+   * Make a POST request to the API
+   * @param {string} endpoint The API endpoint
+   * @param {Object} data The data to send
+   * @returns {Promise<Object>} The response data
+   */
+  async post(endpoint, data = {}) {
+    try {
+      const response = await fetch(`${this.baseUrl}${endpoint}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(data)
+      });
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error ${response.status}`);
+      }
+      
+      return await response.json();
+    } catch (error) {
+      console.error(`Error in POST request to ${endpoint}:`, error);
       throw error;
     }
   }

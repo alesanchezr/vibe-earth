@@ -66,6 +66,22 @@
             color: #4CAF50;
             font-weight: bold;
         }
+        #user-info {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            background-color: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 15px 20px;
+            border-radius: 8px;
+            font-family: Arial, sans-serif;
+            font-size: 14px;
+            font-weight: bold;
+            z-index: 100;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            min-width: 180px;
+        }
     </style>
 </head>
 <body>
@@ -78,6 +94,11 @@
         <div id="zoom-indicator">
             <div>View Height: <span id="zoom-value" class="indicator-value">1.0</span> km</div>
             <div>Field of View: <span id="fov-value" class="indicator-value">60</span>°</div>
+        </div>
+        <div id="user-info">
+            <p>Your ID: <span id="user-id" class="indicator-value">Anonymous</span></p>
+            <p>Status: <span id="user-status" class="indicator-value">Connecting...</span></p>
+            <p>Type: <span id="user-type" class="indicator-value">Unknown</span></p>
         </div>
     </div>
     <script type="module" src="/src/frontend/main.js"></script>

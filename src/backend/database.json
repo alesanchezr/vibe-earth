@@ -1,10 +1,9 @@
 {
   "dev": {
     "driver": "pg",
-    "user": "postgres",
-    "password": "postgres",
+    "user": "game_user",
     "host": "localhost",
-    "database": "geekworld",
+    "database": "geek_world_db",
     "port": 5432
   },
   "production": {

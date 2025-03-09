@@ -12,7 +12,9 @@ import { Planet } from './Planet.js';
 import { Sky } from './Sky.js';
 
 export class World {
-    constructor() {
+    constructor(userId) {
+        console.log('World constructor called with userId:', userId);
+        
         // Configuration
         this.config = {
             maxUsers: 100,            // Maximum number of users to show
@@ -44,8 +46,13 @@ export class World {
             groundColors: {
                 day: 0xA5D6A7,         // Green
                 night: 0x2E7D32        // Dark green
-            }
+            },
+            offlineColor: 0x808080     // Gray color for offline geeks
         };
+        
+        // Store the user ID from Supabase
+        this.userId = userId;
+        console.log('World initialized with user ID:', this.userId);
         
         // Initialize properties
         this.users = [];  // Array of users in the world
@@ -53,95 +60,145 @@ export class World {
         this.targetZoomLevel = 1.0;
         this.lastTime = Date.now();
         this._receivedServerStats = false;  // Flag to track if we've received stats from the server
+        this.showOfflineGeeks = true;      // Whether to show offline geeks
         
-        // Initialize Three.js
-        this.initThree();
+        // Camera tracking properties
+        this.isCameraTracking = false;     // Whether the camera is tracking a geek
+        this.focusedGeek = null;           // The geek being tracked
         
-        // Set up event listeners
-        this.setupEventListeners();
+        // First-person perspective properties
+        this.isFirstPerson = false;    // Whether we're in first-person mode
+        this.firstPersonGeek = null;   // The geek we're viewing from
+        this.originalCameraPosition = null; // Store original camera position for returning to third-person
+        this.originalCameraRotation = null; // Store original camera rotation
         
-        // Initialize UI displays
-        this.updateCounterDisplay();
-        
-        // Initialize WebSocket client
-        this.wsClient = new WebSocketClient(this);
-        
-        // Initialize API client
-        this.apiClient = new ApiClient();
-        
-        // Initialize the 3D world
-        this.initializeWorld();
+        try {
+            // Initialize Three.js
+            this.initThree();
+            
+            // Set up event listeners
+            this.setupEventListeners();
+            
+            // Initialize UI displays
+            this.updateCounterDisplay();
+            
+            // Create offline toggle button if the method exists
+            if (typeof this.createOfflineToggleButton === 'function') {
+                this.createOfflineToggleButton();
+            } else {
+                console.warn('createOfflineToggleButton method not found');
+            }
+            
+            // Initialize API client
+            this.apiClient = new ApiClient();
+            
+            // Initialize the 3D world and load initial data
+            // WebSocket client will be initialized after initial data is loaded
+            this.initializeWorld();
+            
+            // We no longer need to call createOrActivateUserGeek here
+            // as the user's geek will be created and focused via WebSocket messages
+        } catch (error) {
+            console.error('Error in World constructor:', error);
+        }
     }
     
     /**
      * Initialize Three.js scene, camera, renderer
      */
     initThree() {
+        console.log("Initializing Three.js...");
         
-        // Create scene
-        this.scene = new THREE.Scene();
-        this.scene.background = new THREE.Color(0x87CEEB); // Default sky blue
-        
-        // Create camera (perspective for 3D with top-down view)
-        const width = window.innerWidth;
-        const height = window.innerHeight;
-        const aspectRatio = width / height;
-        this.camera = new THREE.PerspectiveCamera(
-            60, // Field of view
-            aspectRatio,
-            1,
-            50000 // Far plane
-        );
-        
-        // Position camera above the planet
-        const orbitHeight = this.config.planetRadius + 4500;
-        this.camera.position.set(0, orbitHeight, 0);
-        this.camera.lookAt(0, 0, 0);
-        
-        // Create renderer
-        this.renderer = new THREE.WebGLRenderer({
-            canvas: document.getElementById('worldCanvas'),
-            antialias: true,
-            alpha: false
-        });
-        this.renderer.setSize(window.innerWidth, window.innerHeight);
-        this.renderer.setPixelRatio(window.devicePixelRatio);
-        
-        // Enable shadows
-        this.renderer.shadowMap.enabled = true;
-        this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-        
-        // Ensure proper depth handling
-        this.renderer.sortObjects = true;
-        this.renderer.autoClear = true;
-        
-        // Create the planet
-        this.planet = new Planet({
-            scene: this.scene,
-            radius: this.config.planetRadius,
-            colors: this.config.groundColors
-        });
-        
-        console.log("Creating sky...");
-        // Create the sky
-        this.sky = new Sky({
-            scene: this.scene,
-            renderer: this.renderer,
-            colors: this.config.skyColors,
-            dayDuration: this.config.dayDuration
-        });
-        
-        // The sky will automatically sync with the server
-        // No need to call initTimeOfDay() anymore
-        
-        // Set up orbit controls
-        this.controls = new OrbitControls(this.camera, this.renderer.domElement);
-        this.controls.enableDamping = true; // Add smooth damping
-        this.controls.dampingFactor = 0.05;
-        this.controls.rotateSpeed = 0.5; // Adjust rotation speed
-        this.controls.minDistance = this.config.planetRadius * 1.1; // Don't allow camera too close to planet
-        this.controls.maxDistance = this.config.planetRadius * 5; // Don't allow camera too far from planet
-        
+        try {
+            // Create scene
+            this.scene = new THREE.Scene();
+            this.scene.background = new THREE.Color(0x87CEEB); // Default sky blue
+            
+            // Create camera (perspective for 3D with top-down view)
+            const width = window.innerWidth;
+            const height = window.innerHeight;
+            const aspectRatio = width / height;
+            this.camera = new THREE.PerspectiveCamera(
+                60, // Field of view
+                aspectRatio,
+                1,
+                50000 // Far plane
+            );
+            
+            // Position camera above the planet
+            const orbitHeight = this.config.planetRadius + 4500;
+            this.camera.position.set(0, orbitHeight, 0);
+            this.camera.lookAt(0, 0, 0);
+            
+            // Store the initial camera position for returning to it later
+            this.initialCameraPosition = new THREE.Vector3(0, orbitHeight, 0);
+            
+            // Create renderer
+            this.renderer = new THREE.WebGLRenderer({
+                canvas: document.getElementById('worldCanvas'),
+                antialias: true,
+                alpha: false
+            });
+            this.renderer.setSize(window.innerWidth, window.innerHeight);
+            this.renderer.setPixelRatio(window.devicePixelRatio);
+            
+            // Enable shadows
+            this.renderer.shadowMap.enabled = true;
+            this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+            
+            // Ensure proper depth handling
+            this.renderer.sortObjects = true;
+            this.renderer.autoClear = true;
+            
+            // Add ambient light
+            const ambientLight = new THREE.AmbientLight(0x404040, 0.5);
+            this.scene.add(ambientLight);
+            
+            // Add directional light (sun)
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
+            directionalLight.position.set(1, 1, 1).normalize();
+            this.scene.add(directionalLight);
+            
+            console.log("Creating planet...");
+            // Create the planet
+            try {
+                this.planet = new Planet({
+                    scene: this.scene,
+                    radius: this.config.planetRadius,
+                    colors: this.config.groundColors
+                });
+                console.log("Planet created successfully:", this.planet);
+            } catch (error) {
+                console.error("Error creating planet:", error);
+            }
+            
+            console.log("Creating sky...");
+            // Create the sky
+            try {
+                this.sky = new Sky({
+                    scene: this.scene,
+                    renderer: this.renderer,
+                    colors: this.config.skyColors,
+                    dayDuration: this.config.dayDuration
+                });
+                console.log("Sky created successfully:", this.sky);
+            } catch (error) {
+                console.error("Error creating sky:", error);
+            }
+            
+            // Create orbit controls
+            this.controls = new OrbitControls(this.camera, this.renderer.domElement);
+            this.controls.enableDamping = true;
+            this.controls.dampingFactor = 0.05;
+            this.controls.screenSpacePanning = false;
+            this.controls.minDistance = this.config.planetRadius + 10;
+            this.controls.maxDistance = this.config.planetRadius * 5;
+            this.controls.maxPolarAngle = Math.PI;
+            
+            console.log("Three.js initialized successfully");
+        } catch (error) {
+            console.error("Error initializing Three.js:", error);
+        }
     }
     
     /**
@@ -250,13 +307,33 @@ export class World {
     initializeWorld() {
         console.log("Initializing 3D world...");
         
-        // Start animation loop
-        this.animate(0);
-        
-        // Start periodic stats update
-        this.startStatsUpdates();
-        
-        console.log("3D world initialized");
+        try {
+            // Debug THREE.js availability
+            console.log("THREE.js version:", THREE.REVISION);
+            console.log("OrbitControls available:", typeof OrbitControls !== 'undefined');
+            console.log("TWEEN available:", typeof TWEEN !== 'undefined');
+            
+            // Debug planet and sky instances
+            console.log("Planet instance:", this.planet);
+            console.log("Sky instance:", this.sky);
+            
+            // Start animation loop
+            this.animate(0);
+            
+            // Start periodic stats update
+            this.startStatsUpdates();
+            
+            // Update user info display if the method exists
+            if (typeof this.updateUserInfoDisplay === 'function') {
+                this.updateUserInfoDisplay();
+            } else {
+                console.warn('updateUserInfoDisplay method not found');
+            }
+            
+            console.log("3D world initialized successfully");
+        } catch (error) {
+            console.error("Error initializing 3D world:", error);
+        }
     }
     
     /**
@@ -316,8 +393,19 @@ export class World {
                     console.warn('Failed to sync sky with server:', error);
                 });
             }
+            
+            // Initialize WebSocket client after initial data is loaded
+            if (!this.wsClient && this.userId) {
+                console.log('Initial data loaded, initializing WebSocket client');
+                this.wsClient = new WebSocketClient(this);
+            }
         } catch (error) {
             console.error('Error fetching stats:', error);
+            
+            // If we failed to fetch stats, still initialize WebSocket client after a delay
+            if (!this.wsClient && this.userId) {
+                console.log('Failed to fetch initial data');
+            }
         }
     }
     
@@ -368,41 +456,96 @@ export class World {
     
     /**
      * Add a user from server data
-     * @param {Object} userData The user data from the server
+     * @param {Object} userData - User data from server
      */
     addUserFromServer(userData) {
-        // Check if position is already in the correct format
-        let position;
-        if (userData.position) {
-            // New format: position is already an object with x, y, z
-            position = userData.position;
-        } else {
-            // Old format: position_x, position_y, position_z as separate properties
-            position = {
-                x: userData.position_x,
-                y: userData.position_y,
-                z: userData.position_z
-            };
+        console.log('Adding user from server:', userData);
+        
+        // Check if we already have this user
+        const existingUserIndex = this.users.findIndex(user => user.id === userData.id);
+        if (existingUserIndex !== -1) {
+            console.log(`User with ID ${userData.id} already exists, updating`);
+            
+            // Update the existing user
+            const existingUser = this.users[existingUserIndex];
+            
+            // Update position if it has changed
+            if (userData.position) {
+                existingUser.targetPosition = {
+                    x: userData.position.x,
+                    y: userData.position.y,
+                    z: userData.position.z
+                };
+                
+                // Create a tween for smooth movement
+                new TWEEN.Tween(existingUser.position)
+                    .to(existingUser.targetPosition, 1000)
+                    .easing(TWEEN.Easing.Quadratic.Out)
+                    .start();
+            }
+            
+            // Update other properties
+            if (userData.size !== undefined) existingUser.size = userData.size;
+            if (userData.color !== undefined) existingUser.updateColor(userData.color);
+            if (userData.active !== undefined) existingUser.active = userData.active;
+            if (userData.anon !== undefined) existingUser.anon = userData.anon;
+            
+            console.log('Returning existing user:', existingUser);
+            return existingUser;
         }
         
-        // Ensure color is in the correct format
-        let color = userData.color;
+        // Process position data from server
+        let processedUserData = { ...userData };
         
-        // If color is a string that looks like a number, convert it to a number
-        if (typeof color === 'string' && !isNaN(color)) {
-            color = Number(color);
+        // Check if position is in the expected format
+        if (!userData.position || 
+            typeof userData.position !== 'object' || 
+            userData.position.x === undefined || 
+            userData.position.y === undefined || 
+            userData.position.z === undefined) {
+            
+            // If position is not in the expected format, try to extract it from individual fields
+            if (userData.position_x !== undefined && 
+                userData.position_y !== undefined && 
+                userData.position_z !== undefined) {
+                
+                processedUserData.position = {
+                    x: userData.position_x,
+                    y: userData.position_y,
+                    z: userData.position_z
+                };
+                console.log('Extracted position from individual fields:', processedUserData.position);
+            } else {
+                // If no position data is available, generate a random position
+                const randomPosition = this.generateRandomPosition();
+                processedUserData.position = randomPosition;
+                console.log('Using random position as fallback:', randomPosition);
+            }
         }
         
-        // Create the new user
-        const user = new Geek({
-            id: userData.id,
-            size: userData.size,
-            color: color,
-            position: position,
+        console.log('Creating new geek with options:', {
+            id: processedUserData.id,
+            client_id: processedUserData.client_id,
+            position: processedUserData.position,
+            // Other properties omitted for brevity
+        });
+        
+        // Convert server data to Geek options
+        const options = {
+            id: processedUserData.id,
+            client_id: processedUserData.client_id,
+            size: processedUserData.size,
+            color: processedUserData.color,
+            position: processedUserData.position,
             scene: this.scene,
             cameraY: this.camera.position.y,
-            planetRadius: this.config.planetRadius
-        });
+            planetRadius: this.config.planetRadius,
+            active: processedUserData.active !== undefined ? processedUserData.active : true,
+            anon: processedUserData.anon !== undefined ? processedUserData.anon : false
+        };
+        
+        // Create the new user
+        const user = new Geek(options);
         
         // Add to the array
         this.users.push(user);
@@ -410,7 +553,10 @@ export class World {
         // Update the counter display
         this.updateCounterDisplay();
         
-        console.log(`Added user #${this.users.length} from server with ID ${userData.id}`);
+        console.log(`Added user #${this.users.length} from server with ID ${processedUserData.id}`);
+        console.log('Returning new user:', user);
+        
+        return user;
     }
     
     /**
@@ -490,10 +636,25 @@ export class World {
      * The actual count will be updated by fetchAndUpdateStats() with server data
      */
     updateCounterDisplay() {
-        // Only update if we haven't received server stats yet
-        const counterElement = document.getElementById('counter');
-        if (counterElement && !this._receivedServerStats) {
-            counterElement.textContent = this.users.length;
+        try {
+            console.log("Updating counter display...");
+            
+            const counterElement = document.getElementById('counter');
+            if (counterElement) {
+                // Count only active users
+                const activeUserCount = this.users.filter(user => user && user.active).length;
+                counterElement.textContent = activeUserCount;
+                console.log(`Counter updated: ${activeUserCount} active users`);
+            }
+            
+            // Also update total counter if available
+            const totalCounterElement = document.getElementById('total-counter');
+            if (totalCounterElement) {
+                totalCounterElement.textContent = this.users.length;
+                console.log(`Total counter updated: ${this.users.length} total users`);
+            }
+        } catch (error) {
+            console.error("Error updating counter display:", error);
         }
     }
     
@@ -553,34 +714,70 @@ export class World {
         // Request next frame
         requestAnimationFrame(this.animate.bind(this));
         
-        // Calculate delta time in seconds
-        const deltaTime = (currentTime - (this.lastTime || currentTime)) / 1000;
-        this.lastTime = currentTime;
-        
-        // Cap delta time to prevent large jumps
-        const dt = Math.min(deltaTime, 0.1);
-        
-        // Update orbit controls
-        this.controls.update();
-        
-        // Update zoom indicator with current camera height
-        this.updateZoomIndicator();
-        
-        // Update all users
-        for (const user of this.users) {
-            user.update(dt, currentTime / 1000);
+        try {
+            // Calculate delta time in seconds
+            const deltaTime = (currentTime - (this.lastTime || currentTime)) / 1000;
+            this.lastTime = currentTime;
+            
+            // Cap delta time to prevent large jumps
+            const dt = Math.min(deltaTime, 0.1);
+            
+            // Update orbit controls if available
+            if (this.controls) {
+                this.controls.update();
+            }
+            
+            // Update zoom indicator with current camera height
+            this.updateZoomIndicator();
+            
+            // Update all users
+            for (const user of this.users) {
+                user.update(dt, currentTime / 1000);
+            }
+            
+            // Handle camera tracking for falling geeks
+            if (this.isCameraTracking && this.focusedGeek) {
+                // Log tracking status every second
+                if (Math.floor(currentTime / 1000) % 1 === 0) {
+                    console.log('Camera tracking active, focused geek:', this.focusedGeek.id);
+                    console.log('Geek is simulating:', this.focusedGeek.isSimulating);
+                    console.log('Geek position:', this.focusedGeek.mesh.position);
+                }
+                
+                // Check if the geek is still falling
+                if (this.focusedGeek.isSimulating) {
+                    // Update camera position to follow the falling geek
+                    this.updateCameraForFallingGeek(this.focusedGeek);
+                } else {
+                    // Geek has landed, stop tracking
+                    console.log('Geek has landed, stopping camera tracking');
+                    this.isCameraTracking = false;
+                    
+                    // Return the camera to the sky view if returnToSkyAfterLanding is true
+                    if (this.returnToSkyAfterLanding) {
+                        // Wait a moment to show the landing before returning to sky
+                        setTimeout(() => {
+                            this.returnCameraToSky();
+                        }, 2000); // Wait 2 seconds before returning to sky view
+                    }
+                }
+            }
+            
+            // Update day/night cycle if sky and planet are available
+            if (this.sky && this.planet) {
+                this.sky.update(dt, this.lerpColor, (timeOfDay) => {
+                    this.planet.updateColor(timeOfDay, this.lerpColor);
+                });
+            }
+            
+            // Update TWEEN animations
+            TWEEN.update();
+            
+            // Render the scene
+            this.renderer.render(this.scene, this.camera);
+        } catch (error) {
+            console.error('Error in animation loop:', error);
         }
-        
-        // Update day/night cycle
-        this.sky.update(dt, this.lerpColor, (timeOfDay) => {
-            this.planet.updateColor(timeOfDay, this.lerpColor);
-        });
-        
-        // Update TWEEN animations
-        TWEEN.update(currentTime);
-        
-        // Render the scene
-        this.renderer.render(this.scene, this.camera);
     }
     
     /**
@@ -604,5 +801,378 @@ export class World {
         const b = Math.round(b1 + (b2 - b1) * t);
         
         return (r << 16) | (g << 8) | b;
+    }
+    
+    /**
+     * Create or activate the user's geek
+     */
+    async createOrActivateUserGeek() {
+        console.log('createOrActivateUserGeek called, userId:', this.userId);
+        
+        if (!this.userId) {
+            console.error('createOrActivateUserGeek: userId is null or undefined');
+            return;
+        }
+        
+        try {
+            // The user's geek is created during anonymous authentication
+            // This method is now just for activating an existing geek
+            
+            // Find the user's geek
+            const userGeek = this.findUserGeek();
+            console.log('findUserGeek returned:', userGeek);
+            
+            if (userGeek) {
+                console.log('Found user geek:', userGeek);
+                
+                // Focus the camera on the user's geek
+                // The camera will automatically position itself to see the drop animation
+                // if the geek is still falling
+                console.log('Calling focusCameraOnGeek from createOrActivateUserGeek');
+                this.focusCameraOnGeek(userGeek);
+            } else {
+                console.log('User geek not found, it should have been created during authentication');
+                console.log('Current users:', this.users.map(u => ({ id: u.id, client_id: u.client_id })));
+                
+                // If for some reason the geek wasn't created during authentication,
+                // we could try to create it here, but that's handled by the server now
+            }
+        } catch (error) {
+            console.error('Error activating user geek:', error);
+        }
+    }
+    
+    /**
+     * Find the user's geek in the world
+     * @returns {Object|null} The user's geek or null if not found
+     */
+    findUserGeek() {
+        console.log('findUserGeek called, userId:', this.userId);
+        console.log('Current users:', this.users.map(u => ({ id: u.id, client_id: u.client_id })));
+        
+        if (!this.userId) {
+            console.error('findUserGeek: userId is null or undefined');
+            return null;
+        }
+        
+        const userGeek = this.users.find(user => user.client_id === this.userId);
+        console.log('findUserGeek returning:', userGeek);
+        
+        return userGeek;
+    }
+    
+    /**
+     * Focus the camera on a specific geek
+     * @param {Object} geek The geek to focus on
+     * @param {boolean} [returnToSky=true] Whether to return to sky view after the geek lands
+     */
+    focusCameraOnGeek(geek, returnToSky = true) {
+        console.log('focusCameraOnGeek called with:', geek);
+        
+        if (!geek) {
+            console.error('focusCameraOnGeek: geek is null or undefined');
+            return;
+        }
+        
+        if (!geek.mesh) {
+            console.error('focusCameraOnGeek: geek.mesh is null or undefined');
+            return;
+        }
+        
+        console.log('Focusing camera on geek:', geek);
+        console.log('Geek position:', geek.mesh.position);
+        console.log('Geek is simulating:', geek.isSimulating);
+        
+        // Store the geek we're focusing on
+        this.focusedGeek = geek;
+        
+        // Store whether to return to sky view after the geek lands
+        this.returnToSkyAfterLanding = returnToSky;
+        
+        // If the geek is still falling, set up continuous tracking
+        if (geek.isSimulating) {
+            console.log('Geek is still falling, setting up continuous tracking');
+            this.isCameraTracking = true;
+            
+            // Initial camera positioning
+            this.updateCameraForFallingGeek(geek);
+            
+            // We'll continue tracking in the animate method
+            return;
+        }
+        
+        // For geeks that are already on the surface, just do a one-time camera move
+        // Get the geek's position
+        const position = geek.mesh.position.clone();
+        
+        // Calculate a position slightly above and behind the geek
+        const offset = position.clone().normalize().multiplyScalar(300);
+        const targetPosition = position.clone().add(offset);
+        
+        console.log('Moving camera to position:', targetPosition);
+        
+        // Animate the camera to the new position
+        new TWEEN.Tween(this.camera.position)
+            .to({
+                x: targetPosition.x,
+                y: targetPosition.y,
+                z: targetPosition.z
+            }, 2000)
+            .easing(TWEEN.Easing.Cubic.InOut)
+            .start();
+        
+        // Make the camera look at the geek
+        this.camera.lookAt(position);
+        
+        // Update the controls target to the geek's position
+        this.controls.target.copy(position);
+        
+        // If returnToSky is true, set a timeout to return to sky view
+        if (returnToSky) {
+            setTimeout(() => {
+                this.returnCameraToSky();
+            }, 5000); // Wait 5 seconds before returning to sky view
+        }
+    }
+    
+    /**
+     * Update the user info display
+     */
+    updateUserInfoDisplay() {
+        // Find the user's geek
+        const userGeek = this.findUserGeek();
+        
+        // Update the user status display
+        const userStatusElement = document.getElementById('user-status');
+        if (userStatusElement && userGeek) {
+            if (userGeek.active) {
+                userStatusElement.textContent = 'Connected';
+                userStatusElement.style.color = '#4CAF50'; // Green
+            } else {
+                userStatusElement.textContent = 'Disconnected';
+                userStatusElement.style.color = '#EA4335'; // Red
+            }
+        }
+        
+        // Update the user type display
+        const userTypeElement = document.getElementById('user-type');
+        if (userTypeElement && userGeek) {
+            if (userGeek.anon) {
+                userTypeElement.textContent = 'Anonymous User';
+            } else {
+                userTypeElement.textContent = 'Registered User';
+            }
+        }
+        
+        // Update the user ID display
+        const userIdElement = document.getElementById('user-id');
+        if (userIdElement && this.userId) {
+            // Show only the first 8 characters of the user ID for privacy
+            const shortId = this.userId.substring(0, 8) + '...';
+            userIdElement.textContent = shortId;
+        }
+    }
+    
+    /**
+     * Update a user's status (active/inactive)
+     * @param {string} clientId - The client ID of the user to update
+     * @param {boolean} active - Whether the user is active
+     */
+    updateUserStatus(clientId, active) {
+        console.log(`Updating user status for client ${clientId} to ${active ? 'active' : 'inactive'}`);
+        
+        // Find the user with this client ID
+        const user = this.users.find(u => u.client_id === clientId);
+        
+        if (!user) {
+            console.warn(`No user found with client ID ${clientId}`);
+            return;
+        }
+        
+        // Update the active status
+        user.active = active;
+        
+        // If the user is now active, restore their original color
+        if (active) {
+            if (user.originalColor) {
+                user.updateColor(user.originalColor);
+                user.originalColor = null;
+            }
+            
+            // Make sure the user is visible
+            if (user.mesh) {
+                user.mesh.visible = true;
+            }
+        } else {
+            // User is now inactive
+            
+            // Store original color if not already stored
+            if (!user.originalColor) {
+                user.originalColor = user.color.clone();
+            }
+            
+            // Set to offline color (gray)
+            user.updateColor(new THREE.Color(this.config.offlineColor));
+            
+            // Hide if offline geeks are not shown
+            if (user.mesh) {
+                user.mesh.visible = this.showOfflineGeeks;
+            }
+        }
+        
+        // Update the counter display
+        this.updateCounterDisplay();
+        
+        // Update the user info display if this is the current user
+        if (clientId === this.userId) {
+            this.updateUserInfoDisplay();
+        }
+    }
+    
+    /**
+     * Create a toggle button for showing/hiding offline geeks
+     */
+    createOfflineToggleButton() {
+        try {
+            console.log("Creating offline toggle button...");
+            
+            // Create the button container
+            const buttonContainer = document.createElement('div');
+            buttonContainer.id = 'offline-toggle';
+            buttonContainer.style.position = 'fixed';
+            buttonContainer.style.bottom = '20px';
+            buttonContainer.style.left = '20px';
+            buttonContainer.style.backgroundColor = 'rgba(0, 0, 0, 0.7)';
+            buttonContainer.style.color = 'white';
+            buttonContainer.style.padding = '10px';
+            buttonContainer.style.borderRadius = '5px';
+            buttonContainer.style.cursor = 'pointer';
+            buttonContainer.style.zIndex = '1000';
+            buttonContainer.style.display = 'flex';
+            buttonContainer.style.alignItems = 'center';
+            buttonContainer.style.transition = 'background-color 0.3s';
+            
+            // Create the checkbox
+            const checkbox = document.createElement('input');
+            checkbox.type = 'checkbox';
+            checkbox.id = 'offline-checkbox';
+            checkbox.checked = this.showOfflineGeeks;
+            checkbox.style.marginRight = '10px';
+            
+            // Create the label
+            const label = document.createElement('label');
+            label.htmlFor = 'offline-checkbox';
+            label.textContent = 'Show Offline Geeks';
+            
+            // Add elements to the container
+            buttonContainer.appendChild(checkbox);
+            buttonContainer.appendChild(label);
+            
+            // Add event listener
+            checkbox.addEventListener('change', (event) => {
+                this.showOfflineGeeks = event.target.checked;
+                this.updateOfflineGeeksVisibility();
+            });
+            
+            // Add hover effect
+            buttonContainer.addEventListener('mouseenter', () => {
+                buttonContainer.style.backgroundColor = 'rgba(0, 0, 0, 0.9)';
+            });
+            
+            buttonContainer.addEventListener('mouseleave', () => {
+                buttonContainer.style.backgroundColor = 'rgba(0, 0, 0, 0.7)';
+            });
+            
+            // Add to the document
+            document.body.appendChild(buttonContainer);
+            
+            console.log("Offline toggle button created successfully");
+        } catch (error) {
+            console.error("Error creating offline toggle button:", error);
+        }
+    }
+    
+    /**
+     * Update the visibility of offline geeks based on the toggle state
+     */
+    updateOfflineGeeksVisibility() {
+        try {
+            console.log("Updating offline geeks visibility, showOfflineGeeks =", this.showOfflineGeeks);
+            
+            for (const user of this.users) {
+                if (user && user.active === false) {
+                    if (user.mesh) {
+                        user.mesh.visible = this.showOfflineGeeks;
+                    }
+                }
+            }
+        } catch (error) {
+            console.error("Error updating offline geeks visibility:", error);
+        }
+    }
+    
+    /**
+     * Update camera position for a falling geek
+     * @param {Object} geek The geek that is falling
+     */
+    updateCameraForFallingGeek(geek) {
+        if (!geek || !geek.mesh) {
+            console.error('updateCameraForFallingGeek: geek or geek.mesh is null or undefined');
+            return;
+        }
+        
+        console.log('Updating camera for falling geek:', geek.id);
+        
+        // Get the geek's current position
+        const position = geek.mesh.position.clone();
+        
+        // Calculate a position behind and above the geek
+        // The offset is larger for falling geeks to get a better view
+        const directionToCenter = position.clone().normalize();
+        const offset = directionToCenter.multiplyScalar(400); // Larger offset for better view
+        
+        // Add a height offset to see the drop better
+        const upVector = new THREE.Vector3(0, 1, 0);
+        const heightOffset = upVector.clone().multiplyScalar(200);
+        
+        // Calculate the target camera position
+        const targetPosition = position.clone().add(offset).add(heightOffset);
+        
+        // Set camera position directly for smooth tracking
+        this.camera.position.copy(targetPosition);
+        
+        // Make the camera look at the geek
+        this.camera.lookAt(position);
+        
+        // Update the controls target to the geek's position
+        this.controls.target.copy(position);
+    }
+    
+    /**
+     * Return the camera to the sky view
+     */
+    returnCameraToSky() {
+        console.log('Returning camera to sky view');
+        
+        if (!this.initialCameraPosition) {
+            console.warn('Initial camera position not set, using default');
+            this.initialCameraPosition = new THREE.Vector3(0, this.config.planetRadius + 4500, 0);
+        }
+        
+        // Animate the camera to the initial position
+        new TWEEN.Tween(this.camera.position)
+            .to({
+                x: this.initialCameraPosition.x,
+                y: this.initialCameraPosition.y,
+                z: this.initialCameraPosition.z
+            }, 2000)
+            .easing(TWEEN.Easing.Cubic.InOut)
+            .start();
+        
+        // Set the controls target to the center of the planet
+        this.controls.target.set(0, 0, 0);
+        
+        // Make the camera look at the center of the planet
+        this.camera.lookAt(0, 0, 0);
     }
 }

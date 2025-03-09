@@ -27,6 +27,7 @@
     "vite": "^5.0.0"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.49.1",
     "@tweenjs/tween.js": "^25.0.0",
     "three": "^0.174.0"
   }
