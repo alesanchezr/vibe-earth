@@ -24,7 +24,6 @@ export class Geek {
      * @param {boolean} [options.anon=false] - Whether the geek is anonymous
      */
     constructor(options) {
-        console.log("Creating geek with options:", options);
         
         this.id = options.id; // May be undefined for locally created geeks
         this.client_id = options.client_id; // Client ID associated with this geek
@@ -32,8 +31,6 @@ export class Geek {
         this.active = options.active !== undefined ? options.active : true;
         this.anon = options.anon !== undefined ? options.anon : false;
         
-        // Debug the color value
-        console.log("Color value:", options.color, "Type:", typeof options.color);
         
         // Handle different color formats
         if (typeof options.color === 'string') {
@@ -128,7 +125,6 @@ export class Geek {
         
         // Create the mesh
         this.mesh = this.createMesh();
-        console.log("Geek mesh created:", this.mesh);
         
         // Add to scene
         this.scene.add(this.mesh);
@@ -143,7 +139,6 @@ export class Geek {
         this.particleEmissionRate = this.isCurrentUser ? 30 : 15; // Particles per second
         this.lastParticleTime = 0;
         
-        console.log("Geek created successfully with ID:", this.id);
     }
     
     /**

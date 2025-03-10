@@ -4,7 +4,6 @@
  */
 export class WebSocketClient {
   constructor(world) {
-    console.log('WebSocketClient constructor called with world:', world);
     
     if (!world) {
       console.error('WebSocketClient constructor: world is null or undefined');
@@ -20,7 +19,6 @@ export class WebSocketClient {
     
     // Use the Supabase user ID from the World instance
     this.clientId = this.world.userId;
-    console.log('WebSocket client initialized with client ID:', this.clientId);
     
     if (!this.clientId) {
       console.warn('WebSocketClient: clientId is null or undefined');
@@ -44,7 +42,6 @@ export class WebSocketClient {
     const host = isDev ? 'localhost:3000' : window.location.host;
     const wsUrl = `${protocol}//${host}`;
     
-    console.log(`Connecting to WebSocket server at ${wsUrl}`);
     
     // Create a new WebSocket connection
     this.socket = new WebSocket(wsUrl);
@@ -60,7 +57,6 @@ export class WebSocketClient {
    * Handle WebSocket connection open
    */
   onOpen() {
-    console.log('WebSocket connection established');
     this.connected = true;
     this.reconnectAttempts = 0;
     
@@ -70,7 +66,6 @@ export class WebSocketClient {
     // If we have a client ID, wait 3 seconds before spawning the user
     // This ensures all world initialization animations are complete
     if (this.clientId) {
-      console.log('Waiting 3 seconds before spawning user to allow world initialization to complete...');
       
       // Start a countdown from 3 seconds
       const totalDelay = 3000; // 3 seconds
@@ -94,7 +89,6 @@ export class WebSocketClient {
           // Get the authentication token from localStorage
           const token = localStorage.getItem('auth_token');
           
-          console.log('Sending spawn_user message with clientId:', this.clientId);
           this.send({
             type: 'spawn_user',
             clientId: this.clientId,
@@ -113,10 +107,8 @@ export class WebSocketClient {
    * @param {MessageEvent} event The WebSocket message event
    */
   onMessage(event) {
-    console.log('WebSocket message received:', event.data);
     try {
       const data = JSON.parse(event.data);
-      console.log('Parsed WebSocket message:', data);
       this.handleServerMessage(data);
     } catch (error) {
       console.error('Error parsing WebSocket message:', error);
@@ -163,20 +155,15 @@ export class WebSocketClient {
    * @param {Object} data The message data
    */
   handleServerMessage(data) {
-    console.log('Handling server message of type:', data.type);
     switch (data.type) {
       case 'initial':
         // Handle initial user data
-        console.log('Received initial data with', data.users ? data.users.length : 0, 'users');
         this.handleInitialData(data.users || []);
         break;
         
       case 'new_user':
         // Handle new user added
-        console.log('Received new user data:', data.user);
         if (data.user) {
-          console.log('Adding user from server with client_id:', data.user.client_id);
-          console.log('Current user ID:', this.world.userId);
           
           // Check if this is the current user
           const isCurrentUser = data.user.client_id === this.world.userId;
@@ -191,13 +178,11 @@ export class WebSocketClient {
           if (isCurrentUser) {
             const existingUser = this.world.findUserGeek();
             if (existingUser) {
-              console.log('Current user already exists, updating properties');
               
               // Update properties if needed
               if (userData.active !== undefined) existingUser.active = userData.active;
               
               // Focus the camera on the existing user
-              console.log('Focusing camera on existing user');
               this.world.focusCameraOnGeek(existingUser, true);
               
               // Update status to show the user is active
@@ -208,18 +193,15 @@ export class WebSocketClient {
           }
           
           const addedUser = this.world.addUserFromServer(userData);
-          console.log('User added, returned object:', addedUser);
           
           // If this is our user, focus the camera on it
           if (isCurrentUser) {
-            console.log('This is our user, focusing camera on it');
             
             // Update status to show the user is dropping
             this.updateConnectionStatus(true, 'Dropping...');
             
             // Focus the camera on the user's geek immediately
             if (addedUser) {
-              console.log('Calling focusCameraOnGeek with:', addedUser);
               // Set returnToSky to true to return to sky view after the geek lands
               this.world.focusCameraOnGeek(addedUser, true);
               
@@ -228,7 +210,6 @@ export class WebSocketClient {
                 this.updateConnectionStatus(true, 'Active');
               }, 5000); // Wait 5 seconds for the drop animation to complete
             } else {
-              console.error('Added user object is null or undefined');
               this.updateConnectionStatus(true, 'Active'); // Fallback
             }
           } else {
@@ -241,7 +222,6 @@ export class WebSocketClient {
         
       case 'user_status':
         // Handle user status change
-        console.log('Received user status change:', data);
         if (data.clientId && data.active !== undefined) {
           this.world.updateUserStatus(data.clientId, data.active);
         } else {
@@ -251,7 +231,6 @@ export class WebSocketClient {
         
       case 'remove_user':
         // Handle user removal
-        console.log('Received remove user with ID:', data.id);
         if (data.id !== undefined) {
           this.world.removeUserById(data.id);
         } else {
@@ -261,7 +240,6 @@ export class WebSocketClient {
         
       case 'clear_all_users':
         // Handle clearing all users
-        console.log('Received clear_all_users command');
         this.world.clearUsers();
         break;
         
@@ -296,7 +274,6 @@ export class WebSocketClient {
    * @param {Array} users Array of user data
    */
   handleInitialData(users) {
-    console.log(`Received initial data with ${users.length} users`);
     
     // Clear existing users
     this.world.clearUsers();
@@ -355,7 +332,6 @@ export class WebSocketClient {
       this.send({
         type: 'truncate_users'
       });
-      console.log('Sent request to truncate users table');
     }
   }
   
@@ -375,7 +351,6 @@ export class WebSocketClient {
    */
   updateConnectionStatus(connected, customMessage) {
     try {
-      console.log(`Updating connection status: ${connected ? 'connected' : 'disconnected'}${customMessage ? ', message: ' + customMessage : ''}`);
       
       const userStatusElement = document.getElementById('user-status');
       if (userStatusElement) {

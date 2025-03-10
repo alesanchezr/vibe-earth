@@ -3,193 +3,340 @@
  */
 import * as THREE from 'three';
 import TWEEN from '@tweenjs/tween.js';
+import { Biome } from './biome';
+import { PlanetMaterialWithCaustics } from './materials/OceanCausticsMaterial';
+import { createAtmosphereMaterial } from './materials/AtmosphereMaterial';
+import { loadModels } from './models';
+import { Color } from 'three';
+import { ColorGradient } from './helper/colorgradient';
+
+/**
+ * Planet options type definition
+ * @typedef {Object} PlanetOptions
+ * @property {number} [scatter=1.2] - Amount of vertex scatter for natural variation
+ * @property {number} [ground=0] - Base ground level
+ * @property {number} [detail=50] - Level of geometric detail (triangle count)
+ * @property {Object} [atmosphere] - Atmosphere settings
+ * @property {'normal'|'caustics'} [material='normal'] - Material type to use
+ * @property {Object} [biome] - Biome configuration
+ * @property {'sphere'|'plane'} [shape='sphere'] - Planet shape
+ */
 
 export class Planet {
+    worker;
+    callbacks = {};
+    requestId = 0;
+    biome;
+    biomeOptions;
+    options;
+    vegetationPositions;
+    shape = 'sphere';
+    tempQuaternion = new THREE.Quaternion();
+    mesh = null;
+    atmosphereGradient;
+    pendingRotation = null;
+    ready = false;
+
     /**
      * Create a new planet
-     * @param {Object} options Planet options
-     * @param {THREE.Scene} options.scene The scene to add the planet to
-     * @param {number} options.radius The radius of the planet
-     * @param {Object} options.colors The colors for the planet
-     * @param {number} options.colors.day The day color of the planet
-     * @param {number} options.colors.night The night color of the planet
+     * @param {PlanetOptions} options Planet options
      */
-    constructor(options) {
-        this.scene = options.scene;
-        this.radius = options.radius || 3000;
-        this.colors = options.colors || {
-            day: 0xA5D6A7,   // Green
-            night: 0x2E7D32   // Dark green
-        };
-        
-        // Create the planet mesh
-        this.createMesh();
-        
-        // Add to scene
-        this.scene.add(this.mesh);
+    constructor(options = {}) {
+        this.shape = options.shape ?? 'sphere';
+        this.options = options;
+        this.biome = new Biome(options.biome);
+        this.biomeOptions = this.biome.options;
+        this.mesh = null;
+        this.ready = false;
+        this.pendingRotation = null;
+
+        // Initialize web worker
+        this.worker = new Worker(new URL('./worker.js', import.meta.url), {
+            type: 'module'
+        });
+        this.worker.onmessage = this.handleMessage.bind(this);
+
+        // Create atmosphere color gradient with more vibrant colors
+        this.atmosphereGradient = new ColorGradient({
+            stops: [
+                [0, new Color(0x1a1a2e)],     // Night - Deep blue
+                [0.25, new Color(0x4a4a8a)],  // Dawn - Purple
+                [0.5, new Color(0x87CEEB)],   // Day - Sky blue
+                [0.75, new Color(0x4a4a8a)],  // Dusk - Purple
+                [1, new Color(0x1a1a2e)]      // Night - Deep blue
+            ]
+        });
     }
-    
+
+    /**
+     * Handle messages from the worker
+     */
+    handleMessage(event) {
+        const { type, data, requestId, error } = event.data;
+        
+        if (type === 'error') {
+            console.error('Worker error:', error);
+            return;
+        }
+
+        if (type === 'geometry') {
+            try {
+                // Create main geometry
+                const geometry = this.createBufferGeometry(
+                    new Float32Array(data.positions),
+                    new Float32Array(data.colors),
+                    new Float32Array(data.normals)
+                );
+
+                // Create ocean geometry
+                const oceanGeometry = this.createBufferGeometry(
+                    new Float32Array(data.oceanPositions),
+                    new Float32Array(data.oceanColors),
+                    new Float32Array(data.oceanNormals)
+                );
+
+                // Set ocean morph targets
+                oceanGeometry.morphAttributes.position = [
+                    new THREE.Float32BufferAttribute(new Float32Array(data.oceanMorphPositions), 3)
+                ];
+                oceanGeometry.morphAttributes.normal = [
+                    new THREE.Float32BufferAttribute(new Float32Array(data.oceanMorphNormals), 3)
+                ];
+
+                // Create materials
+                const material = this.createMaterial();
+                const oceanMaterial = this.createOceanMaterial();
+
+                // Create main planet mesh
+                this.mesh = new THREE.Mesh(geometry, material);
+                this.mesh.castShadow = true;
+                this.mesh.receiveShadow = true;
+
+                // Add ocean mesh
+                const oceanMesh = new THREE.Mesh(oceanGeometry, oceanMaterial);
+                oceanMesh.castShadow = true;
+                oceanMesh.receiveShadow = true;
+                this.mesh.add(oceanMesh);
+
+                // Add atmosphere if enabled
+                if (this.options.atmosphere?.enabled) {
+                    const atmosphereMesh = this.createAtmosphereMesh(geometry);
+                    this.mesh.add(atmosphereMesh);
+                }
+
+                // Set planet scale and position
+                const planetRadius = 3000;
+                this.mesh.scale.set(planetRadius, planetRadius, planetRadius);
+                this.mesh.position.set(0, 0, 0);
+
+                // Apply any pending rotation
+                if (this.pendingRotation) {
+                    this.rotate(this.pendingRotation);
+                    this.pendingRotation = null;
+                }
+
+                this.ready = true;
+                this.onMeshCreated?.(this.mesh);
+            } catch (error) {
+                console.error("Error creating planet mesh:", error);
+            }
+        }
+    }
+
+    /**
+     * Create a buffer geometry from arrays
+     */
+    createBufferGeometry(positions, colors, normals) {
+        const geometry = new THREE.BufferGeometry();
+        geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+        geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+        geometry.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
+        return geometry;
+    }
+
+    createMaterial() {
+        const options = { vertexColors: true };
+        return this.options.material === 'caustics'
+            ? new PlanetMaterialWithCaustics({ ...options, shape: this.shape })
+            : new THREE.MeshStandardMaterial(options);
+    }
+
+    createOceanMaterial() {
+        return new THREE.MeshStandardMaterial({
+            vertexColors: true,
+            transparent: true,
+            opacity: 0.8
+        });
+    }
+
+    createAtmosphereMesh(geometry) {
+        const atmosphereMaterial = createAtmosphereMaterial({
+            color: this.options.atmosphere.color || new THREE.Vector3(0.5, 0.7, 1.0),
+            height: this.options.atmosphere.height || 0.15,  // Increased height
+            density: 1.5,  // Added density parameter
+            glowStrength: 1.2,  // Added glow strength
+            glowPower: 2.0,     // Added glow power
+            glowFactor: 1.5     // Added glow factor
+        });
+        
+        const atmosphereMesh = new THREE.Mesh(geometry.clone(), atmosphereMaterial);
+        atmosphereMesh.scale.multiplyScalar(1.15);  // Slightly larger scale
+        atmosphereMesh.renderOrder = 1;  // Ensure atmosphere renders after the planet
+        return atmosphereMesh;
+    }
+
     /**
      * Create the planet mesh
      */
-    createMesh() {
-        // Create the planet geometry
-        const geometry = new THREE.SphereGeometry(this.radius, 64, 64);
-        
-        // Create the planet material
-        this.material = new THREE.MeshPhongMaterial({
-            color: this.colors.day,
-            emissive: 0x103810, // Very slight green glow
-            emissiveIntensity: 0.2,
-            shininess: 30,
-            flatShading: false,
-            transparent: false, // No transparency
-            opacity: 1.0, // Fully opaque
-            side: THREE.FrontSide, // Only render front side
-            depthWrite: true, // Ensure depth is written
-            depthTest: true // Ensure depth testing is enabled
-        });
-        
-        // Create the mesh
-        this.mesh = new THREE.Mesh(geometry, this.material);
-        this.mesh.position.set(0, 0, 0);
-        
-        // Add the mesh to the scene
-        this.scene.add(this.mesh);
-        
-        console.log("Planet mesh created:", this.mesh);
-    }
-    
-    /**
-     * Update the planet color based on time of day
-     * @param {number} timeOfDay Time of day (0-1, where 0 is midnight, 0.5 is noon)
-     * @param {Function} lerpColor Color interpolation function
-     */
-    updateColor(timeOfDay, lerpColor) {
-        let color;
-        
-        if (timeOfDay > 0.25 && timeOfDay < 0.75) {
-            // Daytime
-            const dayProgress = (timeOfDay - 0.25) / 0.5; // 0 to 1 during day
-            
-            if (dayProgress < 0.1) {
-                // Sunrise
-                const t = dayProgress / 0.1;
-                color = lerpColor(this.colors.night, this.colors.day, t);
-            } else if (dayProgress > 0.9) {
-                // Sunset
-                const t = (dayProgress - 0.9) / 0.1;
-                color = lerpColor(this.colors.day, this.colors.night, t);
-            } else {
-                // Full day
-                color = this.colors.day;
-            }
-        } else {
-            // Nighttime
-            color = this.colors.night;
+    async create() {
+        try {
+            // Load vegetation models if specified
+            const models = this.biomeOptions.vegetation?.items.map(item => item.name) || [];
+            const loaded = await Promise.all(models.map(model => loadModels(model)));
+
+            // Create planet mesh
+            this.worker.postMessage({
+                type: 'createGeometry',
+                data: this.options
+            });
+
+            return new Promise(resolve => {
+                this.onMeshCreated = resolve;
+            });
+        } catch (error) {
+            console.error('Failed to create planet:', error);
+            this.ready = false;
+            throw error;
         }
+    }
+
+    /**
+     * Update a model's position on the planet surface
+     */
+    updatePosition(model, position) {
+        if (this.shape === 'plane') {
+            model.position.copy(position);
+            model.quaternion.setFromRotationMatrix(
+                new THREE.Matrix4().lookAt(
+                    position,
+                    position.clone().add(new THREE.Vector3(0, 1, 0)),
+                    new THREE.Vector3(0, 0, 1)
+                )
+            );
+        } else {
+            model.position.copy(position);
+            model.quaternion.setFromRotationMatrix(
+                new THREE.Matrix4().lookAt(
+                    position,
+                    new THREE.Vector3(0, 0, 0),
+                    position.clone().normalize()
+                )
+            );
+        }
+    }
+
+    /**
+     * Update planet colors based on time of day
+     * @param {number} timeOfDay - Time of day (0 to 1)
+     */
+    updateColor(timeOfDay) {
+        if (!this.ready || !this.mesh) return;
+
+        // Update atmosphere color if it exists
+        const atmosphereMesh = this.mesh.children.find(child => 
+            child.material && child.material.uniforms && child.material.uniforms.atmosphereColor
+        );
         
-        // Update the material color
-        this.material.color.setHex(color);
+        if (atmosphereMesh) {
+            const currentColor = this.atmosphereGradient.get(timeOfDay);
+            atmosphereMesh.material.uniforms.atmosphereColor.value = currentColor;
+        }
+
+        // Update vegetation colors
+        this.mesh.traverse(child => {
+            if (child instanceof THREE.Mesh && child !== this.mesh && child !== atmosphereMesh) {
+                const material = child.material;
+                if (material.name === 'Snow') {
+                    material.color.setHex(0xffffff);
+                } else if (this.biomeOptions.tintColor) {
+                    const biomeColor = this.biome.getBiomeColor(child.position);
+                    material.color = biomeColor;
+                }
+            }
+        });
     }
-    
+
     /**
-     * Get the position on the planet surface at the given spherical coordinates
-     * @param {number} theta Longitude (0 to 2π)
-     * @param {number} phi Latitude (0 to π)
-     * @returns {THREE.Vector3} Position on the planet surface
-     */
-    getPositionAt(theta, phi) {
-        const x = this.radius * Math.sin(phi) * Math.cos(theta);
-        const y = this.radius * Math.sin(phi) * Math.sin(theta);
-        const z = this.radius * Math.cos(phi);
-        
-        return new THREE.Vector3(x, y, z);
-    }
-    
-    /**
-     * Get a random position on the planet surface
-     * @returns {THREE.Vector3} Random position on the planet surface
-     */
-    getRandomPosition() {
-        const theta = Math.random() * Math.PI * 2; // Longitude (0 to 2π)
-        const phi = Math.acos(2 * Math.random() - 1); // Latitude (0 to π)
-        
-        return this.getPositionAt(theta, phi);
-    }
-    
-    /**
-     * Calculate the normal vector at the given position on the planet
-     * @param {THREE.Vector3} position Position on the planet
-     * @returns {THREE.Vector3} Normal vector
-     */
-    getNormalAt(position) {
-        // For a sphere, the normal is simply the normalized position vector from the center
-        return position.clone().normalize();
-    }
-    
-    /**
-     * Check if a position is on the planet surface
-     * @param {THREE.Vector3} position Position to check
-     * @param {number} tolerance Distance tolerance
-     * @returns {boolean} True if the position is on the planet surface
-     */
-    isOnSurface(position, tolerance = 0.1) {
-        const distance = position.length();
-        return Math.abs(distance - this.radius) <= tolerance;
-    }
-    
-    /**
-     * Rotate the planet to a specific angle or to center a specific point
-     * @param {Object} options Rotation options
-     * @param {THREE.Vector3} [options.targetPosition] Position to center (optional)
-     * @param {Object} [options.targetRotation] Target rotation in radians (optional)
-     * @param {number} [options.duration=2000] Animation duration in milliseconds
-     * @param {Function} [options.easing=TWEEN.Easing.Cubic.InOut] Easing function
-     * @returns {TWEEN.Tween} The tween animation object
+     * Rotate the planet
      */
     rotate(options = {}) {
         if (!this.mesh) {
-            console.error('Planet mesh not initialized');
+            this.pendingRotation = options;
             return null;
         }
 
-        // Default options
         const duration = options.duration || 2000;
         const easing = options.easing || TWEEN.Easing.Cubic.InOut;
-        
-        // Calculate target rotation
         let targetRotation = { x: 0, y: 0, z: 0 };
-        
-        // If a target position is provided, calculate rotation to center it
+
         if (options.targetPosition && options.targetPosition instanceof THREE.Vector3) {
-            // Calculate the angle needed to rotate the planet so the target is centered in view
-            // We need to rotate around the Y axis to keep the target in the center
             const angle = Math.atan2(options.targetPosition.x, options.targetPosition.z);
-            
-            // Set the target rotation to spin the planet
-            targetRotation.y = -angle; // Negative angle to rotate the planet correctly
-        } 
-        // If a target rotation is provided, use it
-        else if (options.targetRotation) {
+            targetRotation.y = -angle;
+        } else if (options.targetRotation) {
             targetRotation = options.targetRotation;
         }
-        
-        // Create and return the tween animation
+
         return new TWEEN.Tween(this.mesh.rotation)
             .to(targetRotation, duration)
             .easing(easing)
             .start();
     }
-    
+
     /**
-     * Dispose of the planet resources
+     * Get a random position on the planet surface
+     * @returns {THREE.Vector3} Random position
+     */
+    getRandomPosition() {
+        if (this.shape === 'plane') {
+            return new THREE.Vector3(
+                (Math.random() - 0.5) * 3,
+                0,
+                (Math.random() - 0.5) * 3
+            );
+        } else {
+            const phi = Math.acos(-1 + (2 * Math.random()));
+            const theta = Math.random() * Math.PI * 2;
+            return new THREE.Vector3(
+                Math.sin(phi) * Math.cos(theta),
+                Math.sin(phi) * Math.sin(theta),
+                Math.cos(phi)
+            );
+        }
+    }
+
+    /**
+     * Clean up resources
      */
     dispose() {
-        if (this.mesh) {
-            if (this.mesh.geometry) this.mesh.geometry.dispose();
-            if (this.mesh.material) this.mesh.material.dispose();
-            this.scene.remove(this.mesh);
+        if (this.worker) {
+            this.worker.terminate();
         }
+
+        if (this.mesh) {
+            this.mesh.traverse((child) => {
+                if (child.geometry) {
+                    child.geometry.dispose();
+                }
+                if (child.material) {
+                    if (Array.isArray(child.material)) {
+                        child.material.forEach(material => material.dispose());
+                    } else {
+                        child.material.dispose();
+                    }
+                }
+            });
+            this.mesh = null;
+        }
+        this.ready = false;
     }
 } 

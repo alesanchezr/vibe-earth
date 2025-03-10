@@ -29,6 +29,7 @@
   "dependencies": {
     "@supabase/supabase-js": "^2.49.1",
     "@tweenjs/tween.js": "^25.0.0",
-    "three": "^0.174.0"
+    "three": "^0.174.0",
+    "uber-noise": "^0.2.2"
   }
 }

@@ -11,10 +11,12 @@ import { ApiClient } from './api-client.js';
 import { Planet } from './Planet.js';
 import { Sky } from './Sky.js';
 import { DebugShortcuts } from './debug-shortcuts.js';
+import { Color } from 'three';
+import { ColorGradient } from './helper/colorgradient';
+import { PlanetMaterialWithCaustics } from './materials/OceanCausticsMaterial';
 
 export class World {
     constructor(userId) {
-        console.log('World constructor called with userId:', userId);
         
         // Configuration
         this.config = {
@@ -53,7 +55,6 @@ export class World {
         
         // Store the user ID from Supabase
         this.userId = userId;
-        console.log('World initialized with user ID:', this.userId);
         
         // Initialize properties
         this.users = [];  // Array of users in the world
@@ -62,6 +63,7 @@ export class World {
         this.lastTime = Date.now();
         this._receivedServerStats = false;  // Flag to track if we've received stats from the server
         this.showOfflineGeeks = true;      // Whether to show offline geeks
+        this.isInitialized = false;        // Flag to track if the world is fully initialized
         
         // Camera tracking properties
         this.isCameraTracking = false;     // Whether the camera is tracking a geek
@@ -72,6 +74,17 @@ export class World {
         this.firstPersonGeek = null;   // The geek we're viewing from
         this.originalCameraPosition = null; // Store original camera position for returning to third-person
         this.originalCameraRotation = null; // Store original camera rotation
+        
+        // Create sky color gradient
+        this.skyGradient = new ColorGradient({
+            stops: [
+                [0, new Color(0x1a1a2e)], // Night
+                [0.25, new Color(0x2a2a4a)], // Dawn
+                [0.5, new Color(0x4a90e2)], // Day
+                [0.75, new Color(0x2a2a4a)], // Dusk
+                [1, new Color(0x1a1a2e)] // Night
+            ]
+        });
         
         try {
             // Initialize Three.js
@@ -94,11 +107,8 @@ export class World {
             this.apiClient = new ApiClient();
             
             // Initialize the 3D world and load initial data
-            // WebSocket client will be initialized after initial data is loaded
             this.initializeWorld();
             
-            // We no longer need to call createOrActivateUserGeek here
-            // as the user's geek will be created and focused via WebSocket messages
         } catch (error) {
             console.error('Error in World constructor:', error);
         }
@@ -108,7 +118,6 @@ export class World {
      * Initialize Three.js scene, camera, renderer
      */
     initThree() {
-        console.log("Initializing Three.js...");
         
         try {
             // Create scene
@@ -152,23 +161,140 @@ export class World {
             this.renderer.autoClear = true;
             
             // Add ambient light
-            const ambientLight = new THREE.AmbientLight(0x404040, 0.5);
+            const ambientLight = new THREE.AmbientLight(0x404040, 1.0);
             this.scene.add(ambientLight);
             
             // Add directional light (sun)
-            const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 2.0);
             directionalLight.position.set(1, 1, 1).normalize();
+            directionalLight.castShadow = true;
+            directionalLight.shadow.mapSize.width = 2048;
+            directionalLight.shadow.mapSize.height = 2048;
+            directionalLight.shadow.camera.near = 0.5;
+            directionalLight.shadow.camera.far = 500;
+            directionalLight.shadow.camera.left = -100;
+            directionalLight.shadow.camera.right = 100;
+            directionalLight.shadow.camera.top = 100;
+            directionalLight.shadow.camera.bottom = -100;
             this.scene.add(directionalLight);
+            
+            // Add a second directional light for better illumination
+            const secondaryLight = new THREE.DirectionalLight(0xffffff, 0.5);
+            secondaryLight.position.set(-1, 0.5, -1).normalize();
+            this.scene.add(secondaryLight);
             
             console.log("Creating planet...");
             // Create the planet
             try {
+                console.log("Starting planet creation...");
                 this.planet = new Planet({
-                    scene: this.scene,
-                    radius: this.config.planetRadius,
-                    colors: this.config.groundColors
+                    shape: 'sphere',
+                    detail: 50,
+                    scatter: 1.2,
+                    atmosphere: {
+                        enabled: true,
+                        color: new THREE.Vector3(0.3, 0.6, 1.0),
+                        height: 0.1
+                    },
+                    material: 'normal',
+                    biome: {
+                        noise: {
+                            min: -0.05,
+                            max: 0.05,
+                            octaves: 4,
+                            lacunarity: 2.0,
+                            gain: {
+                                min: 0.1,
+                                max: 0.8,
+                                scale: 2,
+                            },
+                            warp: 0.3,
+                            scale: 1,
+                            power: 1.5,
+                        },
+                        colors: [
+                            [-0.5, 0x994400],  // Deep terrain
+                            [-0.0, 0xccaa00],  // Beaches
+                            [0.4, 0xcc7700],   // Mountains
+                            [1.0, 0x002222],   // Peaks
+                        ],
+                        seaColors: [
+                            [-1, 0x000066],    // Deep ocean
+                            [-0.55, 0x0000aa], // Medium depth
+                            [-0.1, 0x00f2e5],  // Shallow water
+                        ],
+                        seaNoise: {
+                            min: -0.008,
+                            max: 0.008,
+                            scale: 6,
+                        },
+                        vegetation: {
+                            items: [
+                                {
+                                    name: "Rock",
+                                    density: 50,
+                                    minimumHeight: 0.1,
+                                    colors: {
+                                        Gray: { array: [0x775544] },
+                                    },
+                                },
+                                {
+                                    name: "PineTree",
+                                    density: 50,
+                                    minimumHeight: 0.1,
+                                    maximumHeight: 0.8,
+                                    maximumSlope: Math.PI / 4,
+                                    colors: {
+                                        Brown: { array: [0x8b4513, 0x5b3105] },
+                                        Green: { array: [0x22851e, 0x22a51e] },
+                                        DarkGreen: { array: [0x006400] },
+                                    },
+                                    ground: {
+                                        color: 0x229900,
+                                        radius: 0.1,
+                                        raise: 0.01,
+                                    },
+                                },
+                            ],
+                        },
+                    }
                 });
-                console.log("Planet created successfully:", this.planet);
+                
+                // Create the planet mesh and add it to the scene
+                console.log("Waiting for planet mesh creation...");
+                this.planet.create().then(planetMesh => {
+                    console.log("Planet mesh created successfully:", planetMesh);
+                    console.log("Planet mesh properties:", {
+                        visible: planetMesh.visible,
+                        position: planetMesh.position,
+                        scale: planetMesh.scale,
+                        material: planetMesh.material,
+                        geometry: planetMesh.geometry
+                    });
+                    
+                    this.planetMesh = planetMesh;
+                    this.scene.add(planetMesh);
+                    console.log("Planet added to scene. Scene children:", this.scene.children);
+                    
+                    // Position camera relative to planet size
+                    const orbitHeight = this.config.planetRadius * 1.5; // 1.5 times planet radius
+                    this.camera.position.set(0, orbitHeight, 0);
+                    this.camera.lookAt(0, 0, 0);
+                    
+                    // Update controls
+                    this.controls.minDistance = this.config.planetRadius * 1.1;
+                    this.controls.maxDistance = this.config.planetRadius * 5;
+                    this.controls.target.set(0, 0, 0);
+                    this.controls.update();
+                    
+                    // Mark the world as initialized
+                    this.isInitialized = true;
+                    
+                    // Start the animation loop only after planet is ready
+                    this.animate(0);
+                }).catch(error => {
+                    console.error("Error creating planet mesh:", error);
+                });
             } catch (error) {
                 console.error("Error creating planet:", error);
             }
@@ -279,7 +405,7 @@ export class World {
     /**
      * Initialize the 3D world and start the rendering loop
      */
-    initializeWorld() {
+    async initializeWorld() {
         console.log("Initializing 3D world...");
         
         try {
@@ -295,7 +421,10 @@ export class World {
             // Initialize debug shortcuts (admin only)
             this.debugShortcuts = new DebugShortcuts(this);
             
-            // Start animation loop
+            // Mark the world as initialized
+            this.isInitialized = true;
+            
+            // Start the animation loop
             this.animate(0);
             
             // Start periodic stats update
@@ -318,6 +447,12 @@ export class World {
      * Start periodic stats updates from the server
      */
     startStatsUpdates() {
+        // Only start updates if planet is ready
+        if (!this.planet || !this.planet.ready) {
+            console.warn('Cannot start stats updates: Planet not ready');
+            return;
+        }
+
         // Update stats immediately
         this.fetchAndUpdateStats();
         
@@ -332,8 +467,13 @@ export class World {
      */
     async fetchAndUpdateStats() {
         try {
+            // Check if planet is ready before proceeding
+            if (!this.planet || !this.planet.ready) {
+                console.warn('Cannot fetch stats: Planet not ready');
+                return;
+            }
+
             const stats = await this.apiClient.getStats();
-            console.log('Received stats from server:', stats);
             
             // Mark that we've received server stats
             this._receivedServerStats = true;
@@ -350,8 +490,8 @@ export class World {
                 totalCounterElement.textContent = stats.totalUsers;
             }
             
-            // Render online users if available
-            if (stats.onlineUsers && Array.isArray(stats.onlineUsers)) {
+            // Render online users if available and planet is ready
+            if (stats.onlineUsers && Array.isArray(stats.onlineUsers) && this.planet && this.planet.ready) {
                 // Get current user IDs in the scene
                 const currentUserIds = this.users.map(user => user.id).filter(id => id !== undefined);
                 
@@ -374,7 +514,6 @@ export class World {
             
             // Initialize WebSocket client after initial data is loaded
             if (!this.wsClient && this.userId) {
-                console.log('Initial data loaded, initializing WebSocket client');
                 this.wsClient = new WebSocketClient(this);
             }
         } catch (error) {
@@ -429,7 +568,6 @@ export class World {
             color: color
         });
         
-        console.log(`Added user #${this.users.length} at position:`, position);
     }
     
     /**
@@ -437,8 +575,12 @@ export class World {
      * @param {Object} userData - User data from server
      */
     addUserFromServer(userData) {
-        console.log('Adding user from server:', userData);
-        
+        // Check if planet is ready before adding users
+        if (!this.planet || !this.planet.ready) {
+            console.warn('Cannot add user: Planet not ready');
+            return;
+        }
+
         // Check if we already have this user
         const existingUserIndex = this.users.findIndex(user => user.id === userData.id);
         if (existingUserIndex !== -1) {
@@ -492,7 +634,6 @@ export class World {
                     y: userData.position_y,
                     z: userData.position_z
                 };
-                console.log('Extracted position from individual fields:', processedUserData.position);
             } else {
                 // If no position data is available, generate a random position
                 const randomPosition = this.generateRandomPosition();
@@ -500,13 +641,6 @@ export class World {
                 console.log('Using random position as fallback:', randomPosition);
             }
         }
-        
-        console.log('Creating new geek with options:', {
-            id: processedUserData.id,
-            client_id: processedUserData.client_id,
-            position: processedUserData.position,
-            // Other properties omitted for brevity
-        });
         
         // Convert server data to Geek options
         const options = {
@@ -530,9 +664,6 @@ export class World {
         
         // Update the counter display
         this.updateCounterDisplay();
-        
-        console.log(`Added user #${this.users.length} from server with ID ${processedUserData.id}`);
-        console.log('Returning new user:', user);
         
         return user;
     }
@@ -580,7 +711,6 @@ export class World {
     async addRandomUser() {
         try {
             const response = await this.apiClient.addRandomUser();
-            console.log('Random user added via API:', response);
             
             if (response.success) {
                 // The user will be added via WebSocket broadcast
@@ -615,21 +745,18 @@ export class World {
      */
     updateCounterDisplay() {
         try {
-            console.log("Updating counter display...");
             
             const counterElement = document.getElementById('counter');
             if (counterElement) {
                 // Count only active users
                 const activeUserCount = this.users.filter(user => user && user.active).length;
                 counterElement.textContent = activeUserCount;
-                console.log(`Counter updated: ${activeUserCount} active users`);
             }
             
             // Also update total counter if available
             const totalCounterElement = document.getElementById('total-counter');
             if (totalCounterElement) {
                 totalCounterElement.textContent = this.users.length;
-                console.log(`Total counter updated: ${this.users.length} total users`);
             }
         } catch (error) {
             console.error("Error updating counter display:", error);
@@ -693,6 +820,11 @@ export class World {
         requestAnimationFrame(this.animate.bind(this));
         
         try {
+            // Only proceed if the world is initialized
+            if (!this.isInitialized) {
+                return;
+            }
+            
             // Calculate delta time in seconds
             const deltaTime = (currentTime - (this.lastTime || currentTime)) / 1000;
             this.lastTime = currentTime;
@@ -724,7 +856,6 @@ export class World {
                     this.updateCameraForFallingGeek(this.focusedGeek);
                 } else {
                     // Geek has landed, stop tracking
-                    console.log('Geek has landed, stopping camera tracking');
                     this.isCameraTracking = false;
                     
                     // Return the camera to the sky view if returnToSkyAfterLanding is true
@@ -744,6 +875,11 @@ export class World {
             
             // Update TWEEN animations
             TWEEN.update();
+            
+            // Update planet materials if needed
+            if (this.planetMesh && this.planetMesh.material instanceof PlanetMaterialWithCaustics) {
+                this.planetMesh.material.update();
+            }
             
             // Render the scene
             this.renderer.render(this.scene, this.camera);
@@ -792,19 +928,15 @@ export class World {
             
             // Find the user's geek
             const userGeek = this.findUserGeek();
-            console.log('findUserGeek returned:', userGeek);
             
             if (userGeek) {
-                console.log('Found user geek:', userGeek);
-                
                 // Focus the camera on the user's geek
                 // The camera will automatically position itself to see the drop animation
                 // if the geek is still falling
-                console.log('Calling focusCameraOnGeek from createOrActivateUserGeek');
                 this.focusCameraOnGeek(userGeek);
             } else {
-                console.log('User geek not found, it should have been created during authentication');
-                console.log('Current users:', this.users.map(u => ({ id: u.id, client_id: u.client_id })));
+                console.error('User geek not found, it should have been created during authentication');
+                // console.log('Current users:', this.users.map(u => ({ id: u.id, client_id: u.client_id })));
                 
                 // If for some reason the geek wasn't created during authentication,
                 // we could try to create it here, but that's handled by the server now
@@ -819,8 +951,6 @@ export class World {
      * @returns {Object|null} The user's geek or null if not found
      */
     findUserGeek() {
-        console.log('findUserGeek called, userId:', this.userId);
-        console.log('Current users:', this.users.map(u => ({ id: u.id, client_id: u.client_id })));
         
         if (!this.userId) {
             console.error('findUserGeek: userId is null or undefined');
@@ -828,7 +958,6 @@ export class World {
         }
         
         const userGeek = this.users.find(user => user.client_id === this.userId);
-        console.log('findUserGeek returning:', userGeek);
         
         return userGeek;
     }
@@ -839,7 +968,6 @@ export class World {
      * @param {boolean} [returnToSky=true] Whether to return to sky view after the geek lands
      */
     focusCameraOnGeek(geek, returnToSky = true) {
-        console.log('focusCameraOnGeek called with:', geek);
         
         if (!geek) {
             console.error('focusCameraOnGeek: geek is null or undefined');
@@ -851,10 +979,6 @@ export class World {
             return;
         }
         
-        console.log('Focusing camera on geek:', geek);
-        console.log('Geek position:', geek.mesh.position);
-        console.log('Geek is simulating:', geek.isSimulating);
-        
         // Store the geek we're focusing on
         this.focusedGeek = geek;
         
@@ -863,7 +987,6 @@ export class World {
         
         // If the geek is still falling, set up continuous tracking
         if (geek.isSimulating) {
-            console.log('Geek is still falling, setting up continuous tracking');
             this.isCameraTracking = true;
             
             // Initial camera positioning
@@ -952,7 +1075,6 @@ export class World {
      * @param {boolean} active - Whether the user is active
      */
     updateUserStatus(clientId, active) {
-        console.log(`Updating user status for client ${clientId} to ${active ? 'active' : 'inactive'}`);
         
         // Find the user with this client ID
         const user = this.users.find(u => u.client_id === clientId);
@@ -1007,7 +1129,6 @@ export class World {
      */
     createOfflineToggleButton() {
         try {
-            console.log("Creating offline toggle button...");
             
             // Create the button container
             const buttonContainer = document.createElement('div');
@@ -1059,7 +1180,6 @@ export class World {
             // Add to the document
             document.body.appendChild(buttonContainer);
             
-            console.log("Offline toggle button created successfully");
         } catch (error) {
             console.error("Error creating offline toggle button:", error);
         }
@@ -1070,7 +1190,6 @@ export class World {
      */
     updateOfflineGeeksVisibility() {
         try {
-            console.log("Updating offline geeks visibility, showOfflineGeeks =", this.showOfflineGeeks);
             
             for (const user of this.users) {
                 if (user && user.active === false) {
@@ -1093,8 +1212,6 @@ export class World {
             console.error('updateCameraForFallingGeek: geek or geek.mesh is null or undefined');
             return;
         }
-        
-        console.log('Updating camera for falling geek:', geek.id);
         
         // Get the geek's current position
         const position = geek.mesh.position.clone();
@@ -1126,7 +1243,6 @@ export class World {
      * @param {THREE.Vector3} [startPosition] Optional starting position for the camera animation
      */
     returnCameraToSky(startPosition) {
-        console.log('Returning camera to sky view');
         
         if (!this.initialCameraPosition) {
             console.warn('Initial camera position not set, using default');
@@ -1161,7 +1277,7 @@ export class World {
             .start();
         
         // Rotate the planet to keep the user in view if we have a user geek and the planet
-        if (userGeek && userGeek.mesh && this.planet) {
+        if (userGeek && userGeek.mesh && this.planet && this.planet.mesh) {
             // Use the rotate method from the Planet class
             this.planet.rotate({
                 targetPosition: userGeek.mesh.position.clone()
@@ -1173,5 +1289,24 @@ export class World {
         
         // Make the camera look at the center of the planet
         this.camera.lookAt(0, 0, 0);
+    }
+    
+    // Update the dispose method to clean up planet resources
+    dispose() {
+        if (this.planet) {
+            this.planet.dispose();
+        }
+        // ... rest of dispose code ...
+    }
+
+    update(timeOfDay) {
+        // Update sky color
+        const skyColor = this.skyGradient.get(timeOfDay);
+        this.scene.background = skyColor;
+
+        // Update planet colors
+        if (this.planet) {
+            this.planet.updateColor(timeOfDay);
+        }
     }
 }
