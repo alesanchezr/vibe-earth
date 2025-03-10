@@ -49,13 +49,23 @@ export class Sky {
         this.syncWithServer().then(() => {
             // Now that we have the time, update everything
             this.isInitialized = true;
-            this.update(0, THREE.Color.prototype.lerp);
+            // Use a proper standalone lerp function
+            this.update(0, (color1, color2, t) => {
+                const c1 = new THREE.Color(color1);
+                const c2 = new THREE.Color(color2);
+                return new THREE.Color().copy(c1).lerp(c2, t).getHex();
+            });
         }).catch(error => {
             console.error('Failed to sync with server:', error);
             // Fall back to local time
             this.initTimeOfDay();
             this.isInitialized = true;
-            this.update(0, THREE.Color.prototype.lerp);
+            // Use a proper standalone lerp function
+            this.update(0, (color1, color2, t) => {
+                const c1 = new THREE.Color(color1);
+                const c2 = new THREE.Color(color2);
+                return new THREE.Color().copy(c1).lerp(c2, t).getHex();
+            });
         });
     }
     
@@ -92,7 +102,6 @@ export class Sky {
         // Create the moon material
         const moonMaterial = new THREE.MeshBasicMaterial({
             color: 0xDDDDDD, // Slightly off-white
-            emissive: 0x222222, // Slight glow
             transparent: true, // Enable transparency for fade in/out
             opacity: 0.0 // Start invisible
         });
@@ -261,8 +270,6 @@ export class Sky {
                     // Calculate server time offset for future updates
                     this.lastServerSync = Date.now();
                     this.serverTimeOffset = current;
-                    
-                    console.log(`Synced with server time: ${current.toFixed(2)}, duration: ${duration}ms`);
                     
                     // Expose the control methods to the global scope for inspector console access
                     if (typeof window !== 'undefined' && !window.setTimeOfDay) {

@@ -10,6 +10,7 @@ import { WebSocketClient } from './websocket-client.js';
 import { ApiClient } from './api-client.js';
 import { Planet } from './Planet.js';
 import { Sky } from './Sky.js';
+import { DebugShortcuts } from './debug-shortcuts.js';
 
 export class World {
     constructor(userId) {
@@ -226,21 +227,6 @@ export class World {
             this.updateZoomIndicator();
         }, { passive: false });
         
-        // Keyboard events
-        window.addEventListener('keydown', (event) => {
-            // Clear all users when pressing 'C'
-            if (event.key === 'c' || event.key === 'C') {
-                console.log('Truncating users table...');
-                this.truncateUsers();
-            }
-            
-            // Add a random user when pressing 'A'
-            if (event.key === 'a' || event.key === 'A') {
-                console.log('Adding a random user...');
-                this.addRandomUser();
-            }
-        });
-        
         // Prevent context menu on right-click
         window.addEventListener('contextmenu', (e) => e.preventDefault());
         
@@ -248,17 +234,6 @@ export class World {
         const statsBox = document.getElementById('stats');
         if (statsBox) {
             statsBox.addEventListener('click', () => this.addRandomUser());
-            
-            // Add hover effect to stats box
-            statsBox.addEventListener('mouseenter', () => {
-                statsBox.style.cursor = 'pointer';
-                statsBox.style.transform = 'scale(1.05)';
-                statsBox.style.transition = 'transform 0.2s ease-in-out';
-            });
-            
-            statsBox.addEventListener('mouseleave', () => {
-                statsBox.style.transform = 'scale(1)';
-            });
         }
     }
     
@@ -316,6 +291,9 @@ export class World {
             // Debug planet and sky instances
             console.log("Planet instance:", this.planet);
             console.log("Sky instance:", this.sky);
+            
+            // Initialize debug shortcuts (admin only)
+            this.debugShortcuts = new DebugShortcuts(this);
             
             // Start animation loop
             this.animate(0);
@@ -737,12 +715,8 @@ export class World {
             
             // Handle camera tracking for falling geeks
             if (this.isCameraTracking && this.focusedGeek) {
-                // Log tracking status every second
-                if (Math.floor(currentTime / 1000) % 1 === 0) {
-                    console.log('Camera tracking active, focused geek:', this.focusedGeek.id);
-                    console.log('Geek is simulating:', this.focusedGeek.isSimulating);
-                    console.log('Geek position:', this.focusedGeek.mesh.position);
-                }
+                // Store the current camera position for use when the geek lands
+                this.lastTrackingCameraPosition = this.camera.position.clone();
                 
                 // Check if the geek is still falling
                 if (this.focusedGeek.isSimulating) {
@@ -755,18 +729,16 @@ export class World {
                     
                     // Return the camera to the sky view if returnToSkyAfterLanding is true
                     if (this.returnToSkyAfterLanding) {
-                        // Wait a moment to show the landing before returning to sky
-                        setTimeout(() => {
-                            this.returnCameraToSky();
-                        }, 2000); // Wait 2 seconds before returning to sky view
+                        // Use the last tracking camera position for a smooth transition
+                        this.returnCameraToSky(this.lastTrackingCameraPosition);
                     }
                 }
             }
             
             // Update day/night cycle if sky and planet are available
             if (this.sky && this.planet) {
-                this.sky.update(dt, this.lerpColor, (timeOfDay) => {
-                    this.planet.updateColor(timeOfDay, this.lerpColor);
+                this.sky.update(dt, this.lerpColor.bind(this), (timeOfDay) => {
+                    this.planet.updateColor(timeOfDay, this.lerpColor.bind(this));
                 });
             }
             
@@ -930,7 +902,8 @@ export class World {
         // If returnToSky is true, set a timeout to return to sky view
         if (returnToSky) {
             setTimeout(() => {
-                this.returnCameraToSky();
+                // Pass the current camera position for a smooth transition
+                this.returnCameraToSky(this.camera.position.clone());
             }, 5000); // Wait 5 seconds before returning to sky view
         }
     }
@@ -1150,8 +1123,9 @@ export class World {
     
     /**
      * Return the camera to the sky view
+     * @param {THREE.Vector3} [startPosition] Optional starting position for the camera animation
      */
-    returnCameraToSky() {
+    returnCameraToSky(startPosition) {
         console.log('Returning camera to sky view');
         
         if (!this.initialCameraPosition) {
@@ -1159,15 +1133,40 @@ export class World {
             this.initialCameraPosition = new THREE.Vector3(0, this.config.planetRadius + 4500, 0);
         }
         
-        // Animate the camera to the initial position
-        new TWEEN.Tween(this.camera.position)
-            .to({
-                x: this.initialCameraPosition.x,
-                y: this.initialCameraPosition.y,
-                z: this.initialCameraPosition.z
-            }, 2000)
+        // Find the current user's geek
+        const userGeek = this.findUserGeek();
+        
+        // Use the current camera position as the starting point if not provided
+        const currentPosition = startPosition || this.camera.position.clone();
+        
+        // Calculate a smooth path from current position to sky position
+        // We'll keep the x and z coordinates but smoothly transition the y coordinate
+        const targetPosition = {
+            x: this.initialCameraPosition.x,
+            y: this.initialCameraPosition.y,
+            z: this.initialCameraPosition.z
+        };
+        // Animate the camera to the initial position with a smooth path
+        new TWEEN.Tween(currentPosition)
+            .to(targetPosition, 2500) // Slightly longer duration for smoother effect
             .easing(TWEEN.Easing.Cubic.InOut)
+            .onUpdate(() => {
+                // Update the camera position during the animation
+                this.camera.position.set(
+                    currentPosition.x,
+                    currentPosition.y,
+                    currentPosition.z
+                );
+            })
             .start();
+        
+        // Rotate the planet to keep the user in view if we have a user geek and the planet
+        if (userGeek && userGeek.mesh && this.planet) {
+            // Use the rotate method from the Planet class
+            this.planet.rotate({
+                targetPosition: userGeek.mesh.position.clone()
+            });
+        }
         
         // Set the controls target to the center of the planet
         this.controls.target.set(0, 0, 0);

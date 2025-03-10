@@ -2,6 +2,7 @@
  * Planet class for handling planet rendering and properties
  */
 import * as THREE from 'three';
+import TWEEN from '@tweenjs/tween.js';
 
 export class Planet {
     /**
@@ -136,6 +137,49 @@ export class Planet {
     isOnSurface(position, tolerance = 0.1) {
         const distance = position.length();
         return Math.abs(distance - this.radius) <= tolerance;
+    }
+    
+    /**
+     * Rotate the planet to a specific angle or to center a specific point
+     * @param {Object} options Rotation options
+     * @param {THREE.Vector3} [options.targetPosition] Position to center (optional)
+     * @param {Object} [options.targetRotation] Target rotation in radians (optional)
+     * @param {number} [options.duration=2000] Animation duration in milliseconds
+     * @param {Function} [options.easing=TWEEN.Easing.Cubic.InOut] Easing function
+     * @returns {TWEEN.Tween} The tween animation object
+     */
+    rotate(options = {}) {
+        if (!this.mesh) {
+            console.error('Planet mesh not initialized');
+            return null;
+        }
+
+        // Default options
+        const duration = options.duration || 2000;
+        const easing = options.easing || TWEEN.Easing.Cubic.InOut;
+        
+        // Calculate target rotation
+        let targetRotation = { x: 0, y: 0, z: 0 };
+        
+        // If a target position is provided, calculate rotation to center it
+        if (options.targetPosition && options.targetPosition instanceof THREE.Vector3) {
+            // Calculate the angle needed to rotate the planet so the target is centered in view
+            // We need to rotate around the Y axis to keep the target in the center
+            const angle = Math.atan2(options.targetPosition.x, options.targetPosition.z);
+            
+            // Set the target rotation to spin the planet
+            targetRotation.y = -angle; // Negative angle to rotate the planet correctly
+        } 
+        // If a target rotation is provided, use it
+        else if (options.targetRotation) {
+            targetRotation = options.targetRotation;
+        }
+        
+        // Create and return the tween animation
+        return new TWEEN.Tween(this.mesh.rotation)
+            .to(targetRotation, duration)
+            .easing(easing)
+            .start();
     }
     
     /**
