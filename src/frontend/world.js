@@ -14,10 +14,14 @@ import { DebugShortcuts } from './debug-shortcuts.js';
 import { Color } from 'three';
 import { ColorGradient } from './helper/colorgradient';
 import { PlanetMaterialWithCaustics } from './materials/OceanCausticsMaterial';
+import { setDebug } from './helper/debug';
 
 export class World {
     constructor(userId) {
-        
+        this.init(userId);
+    }
+
+    async init(userId) {
         // Configuration
         this.config = {
             maxUsers: 100,            // Maximum number of users to show
@@ -87,8 +91,11 @@ export class World {
         });
         
         try {
+            // Initialize API client first
+            this.apiClient = new ApiClient();
+            
             // Initialize Three.js
-            this.initThree();
+            await this.initThree();
             
             // Set up event listeners
             this.setupEventListeners();
@@ -103,12 +110,6 @@ export class World {
                 console.warn('createOfflineToggleButton method not found');
             }
             
-            // Initialize API client
-            this.apiClient = new ApiClient();
-            
-            // Initialize the 3D world and load initial data
-            this.initializeWorld();
-            
         } catch (error) {
             console.error('Error in World constructor:', error);
         }
@@ -117,7 +118,7 @@ export class World {
     /**
      * Initialize Three.js scene, camera, renderer
      */
-    initThree() {
+    async initThree() {
         
         try {
             // Create scene
@@ -183,6 +184,15 @@ export class World {
             secondaryLight.position.set(-1, 0.5, -1).normalize();
             this.scene.add(secondaryLight);
             
+            // Create orbit controls before planet creation
+            this.controls = new OrbitControls(this.camera, this.renderer.domElement);
+            this.controls.enableDamping = true;
+            this.controls.dampingFactor = 0.05;
+            this.controls.screenSpacePanning = false;
+            this.controls.minDistance = this.config.planetRadius + 10;
+            this.controls.maxDistance = this.config.planetRadius * 5;
+            this.controls.maxPolarAngle = Math.PI;
+            
             console.log("Creating planet...");
             // Create the planet
             try {
@@ -197,6 +207,7 @@ export class World {
                         height: 0.1
                     },
                     material: 'normal',
+                    debug: false,
                     biome: {
                         noise: {
                             min: -0.05,
@@ -224,9 +235,9 @@ export class World {
                             [-0.1, 0x00f2e5],  // Shallow water
                         ],
                         seaNoise: {
-                            min: -0.008,
-                            max: 0.008,
-                            scale: 6,
+                            min: -0.098,
+                            max: -0.008,
+                            scale: 1,
                         },
                         vegetation: {
                             items: [
@@ -262,7 +273,7 @@ export class World {
                 
                 // Create the planet mesh and add it to the scene
                 console.log("Waiting for planet mesh creation...");
-                this.planet.create().then(planetMesh => {
+                await this.planet.create().then(planetMesh => {
                     console.log("Planet mesh created successfully:", planetMesh);
                     console.log("Planet mesh properties:", {
                         visible: planetMesh.visible,
@@ -292,6 +303,9 @@ export class World {
                     
                     // Start the animation loop only after planet is ready
                     this.animate(0);
+                    
+                    // Start stats updates now that planet is ready
+                    this.startStatsUpdates();
                 }).catch(error => {
                     console.error("Error creating planet mesh:", error);
                 });
@@ -312,15 +326,6 @@ export class World {
             } catch (error) {
                 console.error("Error creating sky:", error);
             }
-            
-            // Create orbit controls
-            this.controls = new OrbitControls(this.camera, this.renderer.domElement);
-            this.controls.enableDamping = true;
-            this.controls.dampingFactor = 0.05;
-            this.controls.screenSpacePanning = false;
-            this.controls.minDistance = this.config.planetRadius + 10;
-            this.controls.maxDistance = this.config.planetRadius * 5;
-            this.controls.maxPolarAngle = Math.PI;
             
             console.log("Three.js initialized successfully");
         } catch (error) {
@@ -399,47 +404,6 @@ export class World {
             // Display the actual camera FOV
             const fov = Math.round(this.camera.fov);
             fovValueElement.textContent = fov;
-        }
-    }
-    
-    /**
-     * Initialize the 3D world and start the rendering loop
-     */
-    async initializeWorld() {
-        console.log("Initializing 3D world...");
-        
-        try {
-            // Debug THREE.js availability
-            console.log("THREE.js version:", THREE.REVISION);
-            console.log("OrbitControls available:", typeof OrbitControls !== 'undefined');
-            console.log("TWEEN available:", typeof TWEEN !== 'undefined');
-            
-            // Debug planet and sky instances
-            console.log("Planet instance:", this.planet);
-            console.log("Sky instance:", this.sky);
-            
-            // Initialize debug shortcuts (admin only)
-            this.debugShortcuts = new DebugShortcuts(this);
-            
-            // Mark the world as initialized
-            this.isInitialized = true;
-            
-            // Start the animation loop
-            this.animate(0);
-            
-            // Start periodic stats update
-            this.startStatsUpdates();
-            
-            // Update user info display if the method exists
-            if (typeof this.updateUserInfoDisplay === 'function') {
-                this.updateUserInfoDisplay();
-            } else {
-                console.warn('updateUserInfoDisplay method not found');
-            }
-            
-            console.log("3D world initialized successfully");
-        } catch (error) {
-            console.error("Error initializing 3D world:", error);
         }
     }
     

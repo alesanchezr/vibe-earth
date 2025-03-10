@@ -9,6 +9,7 @@ import { createAtmosphereMaterial } from './materials/AtmosphereMaterial';
 import { loadModels } from './models';
 import { Color } from 'three';
 import { ColorGradient } from './helper/colorgradient';
+import { setDebug } from './helper/debug';
 
 /**
  * Planet options type definition
@@ -20,6 +21,7 @@ import { ColorGradient } from './helper/colorgradient';
  * @property {'normal'|'caustics'} [material='normal'] - Material type to use
  * @property {Object} [biome] - Biome configuration
  * @property {'sphere'|'plane'} [shape='sphere'] - Planet shape
+ * @property {boolean} [debug=false] - Whether to show debug console logs
  */
 
 export class Planet {
@@ -36,6 +38,7 @@ export class Planet {
     atmosphereGradient;
     pendingRotation = null;
     ready = false;
+    debug = false;
 
     /**
      * Create a new planet
@@ -49,6 +52,10 @@ export class Planet {
         this.mesh = null;
         this.ready = false;
         this.pendingRotation = null;
+        this.debug = options.debug ?? false;
+        
+        // Set global debug flag based on planet's debug setting
+        setDebug(this.debug);
 
         // Initialize web worker
         this.worker = new Worker(new URL('./worker.js', import.meta.url), {
@@ -136,6 +143,7 @@ export class Planet {
                 }
 
                 this.ready = true;
+                console.log('Planet mesh created successfully');
                 this.onMeshCreated?.(this.mesh);
             } catch (error) {
                 console.error("Error creating planet mesh:", error);
@@ -193,6 +201,8 @@ export class Planet {
             // Load vegetation models if specified
             const models = this.biomeOptions.vegetation?.items.map(item => item.name) || [];
             const loaded = await Promise.all(models.map(model => loadModels(model)));
+
+            console.log('Creating planet geometry...');
 
             // Create planet mesh
             this.worker.postMessage({
